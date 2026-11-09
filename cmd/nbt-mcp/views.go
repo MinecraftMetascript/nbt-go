@@ -1,18 +1,14 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"fmt"
 	"hash/fnv"
 	"image"
 	"image/color"
-	"image/png"
 	"sort"
 	"strings"
 
 	"github.com/MinecraftMetascript/nbt-go/structure"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // maxViewCells bounds the text views.
@@ -170,190 +166,7 @@ func (s *state) view(in viewIn) (string, error) {
 	return b.String(), nil
 }
 
-type imageIn struct {
-	Name  string  `json:"name"`
-	View  string  `json:"view,omitempty" jsonschema:"isometric (default, from the south-east and above), isometric_nw (from the north-west), or a flat view: top, north, south, east, west"`
-	Scale int     `json:"scale,omitempty" jsonschema:"pixels per block (default chosen to fit about 800 pixels, at most 16)"`
-	From  *[3]int `json:"from,omitempty" jsonschema:"limit the render to a box: first corner [x, y, z]"`
-	To    *[3]int `json:"to,omitempty" jsonschema:"limit the render to a box: opposite corner [x, y, z], inclusive"`
-}
-
-// renderImage draws the structure with flat colors per block type. Colors
-// are approximations, not textures.
-func (s *state) renderImage(_ context.Context, _ *mcp.CallToolRequest, in imageIn) (*mcp.CallToolResult, any, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	st, err := s.get(in.Name)
-	if err != nil {
-		return nil, nil, err
-	}
-	r, err := regionOf(st, in.From, in.To)
-	if err != nil {
-		return nil, nil, err
-	}
-	view := in.View
-	if view == "" {
-		view = "isometric"
-	}
-	var img *image.RGBA
-	switch view {
-	case "isometric", "isometric_nw":
-		img, err = renderIso(st, r, in.Scale, view == "isometric_nw")
-	default:
-		img, err = renderFlat(st, r, in.Scale, view)
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return nil, nil, err
-	}
-	caption := fmt.Sprintf("%s render of %q (%s), %dx%d pixels. Colors approximate each block's map color; textures, transparency and shapes such as stairs are not drawn.",
-		view, in.Name, r, img.Bounds().Dx(), img.Bounds().Dy())
-	return &mcp.CallToolResult{Content: []mcp.Content{
-		&mcp.ImageContent{Data: buf.Bytes(), MIMEType: "image/png"},
-		&mcp.TextContent{Text: caption},
-	}}, nil, nil
-}
-
-func pickScale(want, extent, maxScale int) int {
-	if want > 0 {
-		return min(want, maxScale)
-	}
-	s := 800 / max(extent, 1)
-	return max(1, min(s, maxScale))
-}
-
-func renderFlat(st *structure.Structure, r box, scale int, view string) (*image.RGBA, error) {
-	va, err := parseView(view)
-	if err != nil {
-		return nil, err
-	}
-	cols := span(r.min[va.col], r.max[va.col], va.colRev)
-	rows := span(r.min[va.row], r.max[va.row], va.rowRev)
-	depths := span(r.min[va.depth], r.max[va.depth], va.depthRev)
-	sc := pickScale(scale, max(len(cols), len(rows)), 16)
-	if len(cols)*len(rows)*sc*sc > 16<<20 {
-		return nil, fmt.Errorf("image would be too large; use a smaller scale or limit it with from and to")
-	}
-	img := image.NewRGBA(image.Rect(0, 0, len(cols)*sc, len(rows)*sc))
-	fillRect(img, img.Bounds(), background)
-	g := newGrid(st)
-	for j, rv := range rows {
-		for i, cv := range cols {
-			for k, dv := range depths {
-				var p vec
-				p[va.col], p[va.row], p[va.depth] = cv, rv, dv
-				bs, _, ok := g.get(p)
-				if !ok || isAir(bs.Name) {
-					continue
-				}
-				// Farther blocks are drawn darker so depth reads.
-				f := 1 - 0.5*float64(k)/float64(max(len(depths)-1, 1))
-				fillRect(img, image.Rect(i*sc, j*sc, (i+1)*sc, (j+1)*sc), shade(blockColor(bs), f))
-				break
-			}
-		}
-	}
-	return img, nil
-}
-
 var background = color.RGBA{0x20, 0x22, 0x28, 0xff}
-
-func renderIso(st *structure.Structure, r box, scale int, fromNW bool) (*image.RGBA, error) {
-	sz := r.size()
-	sc := pickScale(scale, sz[0]+sz[2]+sz[1], 16)
-	if sc < 2 {
-		sc = 2
-	}
-	// Screen position of a block corner: x goes right and down, z left and
-	// down, y up. Viewing from the north-west flips x and z.
-	type block struct {
-		p  vec
-		bs structure.BlockState
-	}
-	g := newGrid(st)
-	var blocks []block
-	for _, b := range st.Blocks {
-		p := toVec(b.Pos)
-		if !r.contains(p) {
-			continue
-		}
-		bs, ok := stateOf(st, b)
-		if !ok || isAir(bs.Name) {
-			continue
-		}
-		blocks = append(blocks, block{p, bs})
-	}
-	if len(blocks) > 1<<20 {
-		return nil, fmt.Errorf("%d blocks is too many to render; limit it with from and to", len(blocks))
-	}
-	local := func(p vec) (int, int, int) {
-		x, y, z := p[0]-r.min[0], p[1]-r.min[1], p[2]-r.min[2]
-		if fromNW {
-			x, z = sz[0]-1-x, sz[2]-1-z
-		}
-		return x, y, z
-	}
-	w := (sz[0] + sz[2]) * sc
-	h := (sz[0]+sz[2])*sc/2 + sz[1]*sc + sc
-	if w*h > 24<<20 {
-		return nil, fmt.Errorf("image would be too large; use a smaller scale or limit it with from and to")
-	}
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	fillRect(img, img.Bounds(), background)
-	ox, oy := sz[2]*sc, sz[1]*sc
-	proj := func(x, y, z float64) (float64, float64) {
-		return float64(ox) + (x-z)*float64(sc), float64(oy) + (x+z)*float64(sc)/2 - y*float64(sc)
-	}
-	// Draw far to near: blocks with a larger x+y+z are closer to the viewer.
-	sort.Slice(blocks, func(i, j int) bool {
-		xi, yi, zi := local(blocks[i].p)
-		xj, yj, zj := local(blocks[j].p)
-		if xi+yi+zi != xj+yj+zj {
-			return xi+yi+zi < xj+yj+zj
-		}
-		return yi < yj
-	})
-	// Neighbour offsets in world space for the visible faces: up, toward the
-	// viewer on x, toward the viewer on z.
-	sx, sz2 := 1, 1
-	if fromNW {
-		sx, sz2 = -1, -1
-	}
-	for _, b := range blocks {
-		x, y, z := local(b.p)
-		fx, fy, fz := float64(x), float64(y), float64(z)
-		c := blockColor(b.bs)
-		hidden := func(d vec) bool {
-			nb, _, ok := g.get(b.p.add(d))
-			return ok && isFull(nb) && r.contains(b.p.add(d))
-		}
-		if !hidden(vec{0, 1, 0}) {
-			ax, ay := proj(fx, fy+1, fz)
-			bx, by := proj(fx+1, fy+1, fz)
-			cx, cy := proj(fx+1, fy+1, fz+1)
-			dx, dy := proj(fx, fy+1, fz+1)
-			fillPoly(img, [][2]float64{{ax, ay}, {bx, by}, {cx, cy}, {dx, dy}}, shade(c, 1))
-		}
-		if !hidden(vec{0, 0, sz2}) {
-			ax, ay := proj(fx, fy+1, fz+1)
-			bx, by := proj(fx+1, fy+1, fz+1)
-			cx, cy := proj(fx+1, fy, fz+1)
-			dx, dy := proj(fx, fy, fz+1)
-			fillPoly(img, [][2]float64{{ax, ay}, {bx, by}, {cx, cy}, {dx, dy}}, shade(c, 0.7))
-		}
-		if !hidden(vec{sx, 0, 0}) {
-			ax, ay := proj(fx+1, fy+1, fz)
-			bx, by := proj(fx+1, fy+1, fz+1)
-			cx, cy := proj(fx+1, fy, fz+1)
-			dx, dy := proj(fx+1, fy, fz)
-			fillPoly(img, [][2]float64{{ax, ay}, {bx, by}, {cx, cy}, {dx, dy}}, shade(c, 0.85))
-		}
-	}
-	return img, nil
-}
 
 func fillRect(img *image.RGBA, r image.Rectangle, c color.RGBA) {
 	r = r.Intersect(img.Bounds())
@@ -366,30 +179,7 @@ func fillRect(img *image.RGBA, r image.Rectangle, c color.RGBA) {
 
 // fillPoly fills a convex polygon, sampling pixel centers.
 func fillPoly(img *image.RGBA, pts [][2]float64, c color.RGBA) {
-	minX, minY, maxX, maxY := pts[0][0], pts[0][1], pts[0][0], pts[0][1]
-	for _, p := range pts {
-		minX, maxX = min(minX, p[0]), max(maxX, p[0])
-		minY, maxY = min(minY, p[1]), max(maxY, p[1])
-	}
-	bounds := img.Bounds()
-	for y := max(int(minY), bounds.Min.Y); y <= min(int(maxY), bounds.Max.Y-1); y++ {
-		for x := max(int(minX), bounds.Min.X); x <= min(int(maxX), bounds.Max.X-1); x++ {
-			px, py := float64(x)+0.5, float64(y)+0.5
-			pos, neg := false, false
-			for i := range pts {
-				a, b := pts[i], pts[(i+1)%len(pts)]
-				cross := (b[0]-a[0])*(py-a[1]) - (b[1]-a[1])*(px-a[0])
-				if cross > 1e-9 {
-					pos = true
-				} else if cross < -1e-9 {
-					neg = true
-				}
-			}
-			if !(pos && neg) {
-				img.SetRGBA(x, y, c)
-			}
-		}
-	}
+	forPolyPixels(img, pts, func(x, y int) { img.SetRGBA(x, y, c) })
 }
 
 func shade(c color.RGBA, f float64) color.RGBA {

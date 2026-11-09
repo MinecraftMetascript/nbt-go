@@ -67,7 +67,7 @@ If the client can't find the command, use the full path from `which nbt-mcp`.
 | `render_layer`       | A top-down text drawing of one y layer, so the model can check its work.            |
 | `lint_structure`     | Check for common mistakes: format, renamed ids, wall and fence connections, missing support, falling blocks over air, doors, beds and tall plants missing a half, fire or lava next to flammables, overhangs, floating parts, empty containers, valuable blocks, jigsaw settings. |
 | `render_view`        | A text projection from the top, bottom or any side: the first block along each line of sight, or its depth. |
-| `render_image`       | A PNG render, isometric or from one side, with an approximate flat color per block.  |
+| `render_image`       | PNG images from several viewpoints in one call: isometric from each corner, plan, the four elevations, or presets (`corners`, `elevations`, `overview`, `all`). `cutaway_y` and `from`/`to` cut it open to show interiors. |
 | `place_jigsaw`       | Place a jigsaw block with typed settings. `final_state` defaults to the block it replaces. |
 | `check_jigsaw_fit`   | Check where a child piece lands on a parent's jigsaws in each rotation, and whether it fits. |
 | `assemble_jigsaw`    | Assemble a whole jigsaw layout from a start piece and template pools, and open the result. |
@@ -87,6 +87,19 @@ Models tend to build boxes: flat walls of one block, a flat roof, no small block
 - **Styles.** *Survival* builds are ones a player could make: common, biome-appropriate materials, 3 to 10 block types, detail where it counts. *Creative* builds are showpieces: rich palettes with texture gradients, dense detail and complex shapes.
 - **Prompt.** The `build` prompt (a slash command in Claude Code: `/minecraft:build`) takes a description, style, theme and name, and walks the model through plan, block out, depth, detail, interior, critique and lint, with the guide attached.
 - **Critique.** `critique_structure` looks at what is visible from outside and scores each category from 0 to 100 against the style's targets, then lists the fixes worth most with coordinates. Use `from` and `to` to critique one building in a larger structure.
+
+## Seeing the structure
+
+`render_image` lets a model look at what it built. It returns one PNG per view, each with a caption saying where the view is from:
+
+- `iso_se`, `iso_sw`, `iso_nw`, `iso_ne`: isometric from above each corner.
+- `top` (plan) and `bottom`.
+- `south` (the front), `north`, `east`, `west`: straight-on elevations.
+- Presets: `corners` (all four isometric views), `elevations` (all four sides), `overview` (`iso_se`, `iso_nw`, `top`, `south`, `east`) and `all` (nine views).
+
+To see inside, `cutaway_y` hides everything above a height. With `top` that gives a floor plan, and with an isometric view a cutaway. `from`/`to` limit the render to a box, which gives a cross-section from any side.
+
+Colors approximate each block's map color; there are no textures. Slabs, stairs, fences, walls, panes, doors, trapdoors, carpets, torches, lanterns, plants and other partial blocks are drawn with their rough shape. Glass, ice and water are see-through. For exact positions, use the text views (`render_view`, `render_layer`).
 
 ## Jigsaw structures
 
