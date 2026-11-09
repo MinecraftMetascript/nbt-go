@@ -3,8 +3,21 @@
 A Go library for Minecraft's [NBT](https://minecraft.wiki/w/NBT_format) format, modeled on `encoding/json`.
 
 ```sh
-go get github.com/MinecraftMetascript/nbt-go
+go get github.com/MinecraftMetascript/nbt-go@latest
 ```
+
+Requires Go 1.22 or newer. The library has no dependencies outside the standard library.
+
+### Working on it alongside another project
+
+To use a local checkout from another module (for example the MCP server) without publishing, use a Go workspace in the parent directory:
+
+```sh
+git clone https://github.com/MinecraftMetascript/nbt-go
+go work init ./your-project ./nbt-go
+```
+
+Imports of `github.com/MinecraftMetascript/nbt-go` in `your-project` now resolve to the local checkout. Don't commit `go.work`. To try an unmerged branch without cloning it, run `go get github.com/MinecraftMetascript/nbt-go@<branch-name>`.
 
 - `Marshal` / `Unmarshal`, `Encoder` / `Decoder`, and `nbt:"name,omitempty"` struct tags, the same way `encoding/json` does it.
 - A `Tag` tree (`Compound`, `List`, `Int`, …) for data whose shape you don't know ahead of time, like `map[string]any` for JSON.
