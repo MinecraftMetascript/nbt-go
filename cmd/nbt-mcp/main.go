@@ -34,7 +34,7 @@ const defaultDataVersion = 4189
 
 func main() {
 	dir := flag.String("dir", ".", "directory that relative save and load paths resolve against")
-	dataVersion := flag.Int("data-version", defaultDataVersion, "DataVersion for new structures (the Minecraft version they target; 4189 is 1.21.4)")
+	dataVersion := flag.Int("data-version", defaultDataVersion, "DataVersion for new structures (the Minecraft version they target; 4189 is 1.21.4, 5023 is 26.3)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [flags]\n\nRuns an MCP server on stdin/stdout for building Minecraft structure files.\n\nFlags:\n", os.Args[0])

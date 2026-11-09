@@ -38,7 +38,7 @@ If the client can't find the command, use the full path from `which nbt-mcp`.
 | Flag            | Default | Meaning                                                                                                      |
 | --------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
 | `-dir`          | `.`     | Directory that relative paths in `save_structure` and `load_structure` resolve against.                      |
-| `-data-version` | `4189`  | DataVersion for new structures (`4189` is 1.21.4). Newer game versions upgrade older data, so a lower value is the safer default. |
+| `-data-version` | `4189`  | DataVersion for new structures (`4189` is 1.21.4, `5023` is 26.3). Newer game versions upgrade older data, so a lower value is the safer default. |
 | `-version`      |         | Print the version and exit.                                                                                  |
 
 ## Tools
@@ -65,7 +65,7 @@ If the client can't find the command, use the full path from `which nbt-mcp`.
 | `describe_structure` | Size, share of blocks, air and empty space, block counts by type, entities, and jigsaw blocks with warnings. |
 | `diff_structures`    | Compare two structures: what changed, grouped by kind, with positions.               |
 | `render_layer`       | A top-down text drawing of one y layer, so the model can check its work.            |
-| `lint_structure`     | Check for common mistakes: format, renamed ids, wall and fence connections, missing support, falling blocks over air, doors, beds and tall plants missing a half, fire or lava next to flammables, overhangs, floating parts, empty containers, valuable blocks, jigsaw settings. |
+| `lint_structure`     | Check for common mistakes: format, renamed ids, blocks newer than the DataVersion, wall and fence connections, missing support, falling blocks over air, doors, beds and tall plants missing a half, fire or lava next to flammables, overhangs, floating parts, empty containers, valuable blocks, jigsaw settings. |
 | `render_view`        | A text projection from the top, bottom or any side: the first block along each line of sight, or its depth. |
 | `render_image`       | A PNG render, isometric or from one side, with an approximate flat color per block.  |
 | `place_jigsaw`       | Place a jigsaw block with typed settings. `final_state` defaults to the block it replaces. |
