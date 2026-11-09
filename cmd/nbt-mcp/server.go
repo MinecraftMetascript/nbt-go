@@ -21,11 +21,13 @@ const maxVolume = 1 << 21
 
 const instructions = `Builds Minecraft Java Edition structure files (.nbt).
 
-Workflow: create_structure, then place blocks with fill and set_blocks, check your work with render_layer and describe_structure, and finish with save_structure.
+Workflow: create_structure, then place blocks with fill, set_blocks, place_grid and the shape tools (fill_ellipsoid, fill_cylinder, fill_tube, decorate_surface), check your work with render_layer, render_view, render_image, describe_structure and lint_structure, and finish with save_structure.
 
-Coordinates are relative to the structure's origin and must be non-negative; x is east, y is up, z is south. Blocks use command syntax, such as "stone_bricks" or "oak_stairs[facing=east,half=bottom]"; the minecraft: namespace is optional. Block entity and entity data use SNBT, such as {LootTable:"minecraft:chests/simple_dungeon"}.
+Coordinates are relative to the structure's origin and must be non-negative; x is east, y is up, z is south. Blocks use command syntax, such as "stone_bricks" or "oak_stairs[facing=east,half=bottom]"; the minecraft: namespace is optional. Anywhere a block is filled, a weighted mix such as "70%stone_bricks,20%cracked_stone_bricks,10%mossy_stone_bricks" also works; random tools take a seed and report the one they used. Block entity and entity data use SNBT, such as {LootTable:"minecraft:chests/simple_dungeon"}.
 
-Positions without a block leave the world unchanged when the structure is placed. Use minecraft:air to clear space.`
+Positions without a block leave the world unchanged when the structure is placed. Use minecraft:air to clear space.
+
+Jigsaw structures: add jigsaw blocks with place_jigsaw, check them with describe_structure (which lists and lints them), check that a child piece fits its parent with check_jigsaw_fit, and preview a whole layout with assemble_jigsaw. A child's jigsaw lands in the block directly in front of the parent's jigsaw: the two jigsaw blocks end up adjacent and face to face. When a jigsaw faces into its own piece's bounding box, the entire child piece must fit inside that box. A start piece placed with project_start_to_heightmap (as villages are) has its y=0 layer at the height of the topmost terrain block, replacing it, so y=0 is sunk one block into the ground and y=1 is the first layer above it; build y=0 as a foundation or raise start_height by 1.`
 
 type state struct {
 	mu          sync.Mutex
@@ -135,8 +137,58 @@ func newServer(s *state) *mcp.Server {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "fill",
-		Description: "Fill a box with one block, like the /fill command. Corners are inclusive. Mode \"replace\" fills the whole box, \"hollow\" fills the shell and puts air inside, and \"outline\" fills only the shell and leaves the inside unchanged.",
+		Description: "Fill a box with one block or a weighted mix, like the /fill command. Corners are inclusive. Mode \"replace\" fills the whole box, \"hollow\" fills the shell and puts air inside, and \"outline\" fills only the shell and leaves the inside unchanged.",
 	}, handler(s, s.fill))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "fill_ellipsoid",
+		Description: "Fill a sphere or ellipsoid, solid or as a watertight hollow shell. Good for domes, boulders, bushes, caves and organic bodies.",
+	}, handler(s, s.ellipsoid))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "fill_cylinder",
+		Description: "Fill a cylinder along x, y or z: solid, a hollow shell, a tube or ring (hollow with open_ends), or a disc (height 1). Cross-sections can be elliptical.",
+	}, handler(s, s.cylinder))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "fill_tube",
+		Description: "Fill a rounded tube along a path of points, optionally tapering from one radius to another. Good for trunks, branches, roots, tentacles, pipes and curved tunnels.",
+	}, handler(s, s.tube))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "decorate_surface",
+		Description: "Apply a block to the exposed faces of solid blocks, like a decal: moss or snow on top surfaces, vines or glow lichen on walls, grass on the top of a mound. Can be limited to a box, to certain blocks, and to a random fraction of positions.",
+	}, handler(s, s.decorate))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "place_grid",
+		Description: "Place many blocks at once from text layers and a legend, in the same layout render_layer draws: each layer is a list of rows from north to south, each character one block going east. Much more compact than set_blocks for detailed builds.",
+	}, handler(s, s.placeGrid))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "check_sealed",
+		Description: "Check that a space is watertight: flood-fill from a position through everything that isn't a full block and report whether it reaches the outside, and where the likely gap is.",
+	}, handler(s, s.checkSealed))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "transform_structure",
+		Description: "Rotate and/or mirror a whole structure in place, turning block states (facing, axis, connections, rails, stairs) and entities to match.",
+	}, handler(s, s.transformStructure))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "paste_structure",
+		Description: "Copy one open structure into another at a position, optionally rotated or mirrored. Use it to merge parts built separately or repeat a module.",
+	}, handler(s, s.pasteStructure))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "crop_structure",
+		Description: "Cut a structure down to a box (inclusive corners), moving that box to the origin. Optionally keep the original and open the cropped copy under a new name.",
+	}, handler(s, s.crop))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "set_size",
+		Description: "Set a structure's size explicitly, to add empty margin or trim it. Shrinking refuses to cut off blocks unless drop is set.",
+	}, handler(s, s.setSize))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "remove_blocks",
@@ -150,13 +202,48 @@ func newServer(s *state) *mcp.Server {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "describe_structure",
-		Description: "Summarize a structure: size, block counts by type, entities and block entities.",
+		Description: "Summarize a structure: size, how much is blocks, air and empty space, block counts by type, entities, block entities, and its jigsaw blocks with warnings about likely mistakes.",
 	}, handler(s, s.describe))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "render_layer",
 		Description: "Draw one horizontal layer (a fixed y) as a top-down text grid, one character per block, with a legend. Rows are z (north at the top), columns are x (west on the left). Use it to check your work.",
 	}, handler(s, s.render))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "diff_structures",
+		Description: "Compare two open structures (for example a file loaded before and after edits): size and DataVersion changes, how many positions differ, a count of each kind of change (stone → air), and the individual changes.",
+	}, handler(s, s.diffStructures))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lint_structure",
+		Description: "Check a structure for common mistakes: file format problems, block ids renamed between versions, walls and fences that don't connect, torches, lanterns and vines with nothing to attach to, blocks with nothing below them (legs hanging off a plinth), floating groups, containers with no loot table, high-value blocks players could mine, and jigsaw settings. Run it before saving.",
+	}, handler(s, s.lint))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "render_view",
+		Description: "Draw the structure as seen from one side (top, bottom, north, south, east or west) as a text grid with a legend, showing the first non-air block along each line of sight. Use south for a front elevation, east or west for a side elevation, top for a plan. show=depth draws how far in each block is instead.",
+	}, handler(s, s.view))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "render_image",
+		Description: "Render the structure as a PNG image, isometric by default or from one side, with an approximate flat color per block type. Use it to judge overall shape and proportions; use render_view or render_layer for exact positions.",
+	}, s.renderImage)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "place_jigsaw",
+		Description: "Place a jigsaw block with its settings (name, target, pool, final_state, joint, priorities) and the right orientation. final_state defaults to the block the jigsaw replaces, so it doesn't leave a hole when the structure generates. Reports where the child piece will attach and any problems.",
+	}, handler(s, s.placeJigsaw))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "check_jigsaw_fit",
+		Description: "Check whether a child piece can attach to a parent piece's jigsaws: for each matching jigsaw and rotation, where the child would end up in the parent's coordinates and whether it fits. A child attached by a jigsaw that faces into the parent's bounding box must fit entirely inside that box, or the game silently places nothing.",
+	}, handler(s, s.checkFit))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "assemble_jigsaw",
+		Description: "Assemble a jigsaw structure from a start piece and template pools, following the game's placement rules (attachment, priorities, depth, max distance, and the rule that pieces can't overlap), and open the result as a new structure to inspect with render_layer and describe_structure. Reports every piece placed and every jigsaw that placed nothing, with the reason. Pools come from a datapack folder or inline JSON; element locations can name open structures. Terrain, processors and terrain_matching projection are ignored.",
+	}, handler(s, s.assemble))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "save_structure",
@@ -293,8 +380,9 @@ func (b boxIn) bounds() (lo, hi [3]int, err error) {
 
 type fillIn struct {
 	boxIn
-	Block string `json:"block" jsonschema:"block in command syntax, e.g. stone_bricks or oak_planks"`
+	Block string `json:"block" jsonschema:"block in command syntax, e.g. stone_bricks, or a weighted mix such as 70%stone_bricks,30%cracked_stone_bricks"`
 	Mode  string `json:"mode,omitempty" jsonschema:"replace (default), hollow, or outline"`
+	Seed  *int64 `json:"seed,omitempty" jsonschema:"random seed for block mixes; a random one is used and reported if omitted"`
 }
 
 func (s *state) fill(in fillIn) (string, error) {
@@ -302,10 +390,11 @@ func (s *state) fill(in fillIn) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	bs, err := structure.ParseBlockState(in.Block)
+	pat, err := parsePattern(in.Block)
 	if err != nil {
 		return "", err
 	}
+	rng, seed := newRNG(in.Seed)
 	lo, hi, err := in.bounds()
 	if err != nil {
 		return "", err
@@ -323,7 +412,7 @@ func (s *state) fill(in fillIn) (string, error) {
 		for y := lo[1]; y <= hi[1]; y++ {
 			for z := lo[2]; z <= hi[2]; z++ {
 				edge := x == lo[0] || x == hi[0] || y == lo[1] || y == hi[1] || z == lo[2] || z == hi[2]
-				place := bs
+				place := pat.pick(rng)
 				if !edge {
 					switch mode {
 					case "hollow":
@@ -339,7 +428,11 @@ func (s *state) fill(in fillIn) (string, error) {
 			}
 		}
 	}
-	return fmt.Sprintf("Filled %d positions from %v to %v with %s (%s). Size is now %v.", n, lo, hi, bs, mode, st.Size), nil
+	msg := fmt.Sprintf("Filled %d positions from %v to %v with %s (%s)", n, lo, hi, pat, mode)
+	if pat.random() {
+		msg += fmt.Sprintf(", seed %d", seed)
+	}
+	return msg + fmt.Sprintf(". Size is now %v.", st.Size), nil
 }
 
 func (s *state) remove(in boxIn) (string, error) {
@@ -418,6 +511,12 @@ func summarize(st *structure.Structure) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "DataVersion %d, size %d x %d x %d (x, y, z), %d blocks, %d entities.\n",
 		st.DataVersion, st.Size[0], st.Size[1], st.Size[2], len(st.Blocks), len(st.Entities))
+	if vol := int(st.Size[0]) * int(st.Size[1]) * int(st.Size[2]); vol > 0 {
+		solid, air, empty := airStats(st)
+		pct := func(n int) float64 { return 100 * float64(n) / float64(vol) }
+		fmt.Fprintf(&b, "Of %d positions: %d blocks (%.1f%%), %d air (%.1f%%), %d empty, left unchanged when placed (%.1f%%).\n",
+			vol, solid, pct(solid), air, pct(air), empty, pct(empty))
+	}
 	if len(st.Palettes) > 0 {
 		fmt.Fprintf(&b, "Has %d palette variants; counts use the first.\n", len(st.Palettes))
 	}
@@ -457,6 +556,7 @@ func summarize(st *structure.Structure) string {
 			fmt.Fprintf(&b, "  %v at %v\n", e.NBT["id"], e.Pos)
 		}
 	}
+	b.WriteString(jigsawReport(st))
 	return b.String()
 }
 

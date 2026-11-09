@@ -55,14 +55,24 @@ func TestListTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Each tool's own tests cover its behavior; this checks they're all registered.
 	want := []string{"add_entity", "create_structure", "describe_structure", "fill", "list_structures",
-		"load_structure", "remove_blocks", "render_layer", "save_structure", "set_blocks"}
-	var got []string
+		"load_structure", "remove_blocks", "render_layer", "save_structure", "set_blocks",
+		"place_jigsaw", "check_jigsaw_fit", "assemble_jigsaw",
+		"fill_ellipsoid", "fill_cylinder", "fill_tube", "decorate_surface", "place_grid", "check_sealed",
+		"transform_structure", "paste_structure", "crop_structure", "set_size",
+		"render_view", "render_image", "lint_structure", "diff_structures"}
+	got := map[string]bool{}
 	for _, tool := range res.Tools {
-		got = append(got, tool.Name)
+		got[tool.Name] = true
 	}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("tools = %v, want %v", got, want)
+	for _, w := range want {
+		if !got[w] {
+			t.Errorf("tool %s is not registered", w)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("%d tools registered, want %d", len(got), len(want))
 	}
 }
 
