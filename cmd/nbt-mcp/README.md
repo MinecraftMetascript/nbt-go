@@ -71,11 +71,22 @@ If the client can't find the command, use the full path from `which nbt-mcp`.
 | `place_jigsaw`       | Place a jigsaw block with typed settings. `final_state` defaults to the block it replaces. |
 | `check_jigsaw_fit`   | Check where a child piece lands on a parent's jigsaws in each rotation, and whether it fits. |
 | `assemble_jigsaw`    | Assemble a whole jigsaw layout from a start piece and template pools, and open the result. |
+| `critique_structure` | Score how hand-crafted a build looks (survival or creative style) and list fixes: flat walls, palette, detail blocks, silhouette, overhangs, foundation, windows, asymmetry, survival materials. |
+| `building_guide`     | The building guide: principles, survival and creative styles, and palettes by theme. |
 | `save_structure`     | Write a gzip-compressed `.nbt` file.                                                 |
 
 Blocks use command syntax (`oak_stairs[facing=east,half=bottom]`), and the `minecraft:` namespace is optional. Wherever a tool fills an area, the block can also be a weighted mix such as `70%stone_bricks,20%cracked_stone_bricks,10%mossy_stone_bricks` (`3*stone,1*andesite` works too). Every random tool takes a `seed` and reports the seed it used, so a result can be reproduced.
 
 Hollow shapes are watertight: every inside position is cut off from the outside on all six faces, so water and mobs can't get through diagonal gaps. By default the inside is filled with air, which clears out water or terrain when the structure is placed.
+
+## Building guide and critique
+
+Models tend to build boxes: flat walls of one block, a flat roof, no small blocks, perfect symmetry. The server ships a building guide to steer them away from that, and a critique tool to check the result.
+
+- **Guide.** `building_guide` returns the guide as text; the same sections are MCP resources (`nbt-mcp://guide/building`, `.../survival`, `.../creative`, `.../palettes`). It covers silhouette, depth (frame and set-back infill, overhangs), palette gradients, detailing with partial blocks, asymmetry and interiors, plus palettes per theme (medieval, castle, nordic, desert, swamp, ruined, nether).
+- **Styles.** *Survival* builds are ones a player could make: common, biome-appropriate materials, 3 to 10 block types, detail where it counts. *Creative* builds are showpieces: rich palettes with texture gradients, dense detail and complex shapes.
+- **Prompt.** The `build` prompt (a slash command in Claude Code: `/minecraft:build`) takes a description, style, theme and name, and walks the model through plan, block out, depth, detail, interior, critique and lint, with the guide attached.
+- **Critique.** `critique_structure` looks at what is visible from outside and scores each category from 0 to 100 against the style's targets, then lists the fixes worth most with coordinates. Use `from` and `to` to critique one building in a larger structure.
 
 ## Jigsaw structures
 
