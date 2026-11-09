@@ -7,7 +7,8 @@ import (
 
 func TestLint(t *testing.T) {
 	cs := connect(t, t.TempDir())
-	call(t, cs, "create_structure", map[string]any{"name": "s"}, false)
+	// 1.21.4, so that iron_chain (1.21.9) is flagged as renamed.
+	call(t, cs, "create_structure", map[string]any{"name": "s", "data_version": 4189}, false)
 	call(t, cs, "fill", map[string]any{"name": "s", "from": []int{0, 0, 0}, "to": []int{4, 0, 4}, "block": "stone"}, false)
 	call(t, cs, "set_blocks", map[string]any{"name": "s", "blocks": []map[string]any{
 		{"x": 0, "y": 1, "z": 0, "block": "cobblestone_wall[east=tall,north=none,south=none,west=none,up=true]"},
