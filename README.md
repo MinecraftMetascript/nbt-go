@@ -19,12 +19,6 @@ go work init ./your-project ./nbt-go
 
 Imports of `github.com/MinecraftMetascript/nbt-go` in `your-project` now resolve to the local checkout. Don't commit `go.work`. To try an unmerged change without cloning it, run `go get github.com/MinecraftMetascript/nbt-go@<commit-sha>`. Branch names that contain a `/` can't be used as versions.
 
-While the repository is private, the public module proxy can't fetch it. Tell Go to fetch it directly with your own git credentials:
-
-```sh
-go env -w GOPRIVATE=github.com/MinecraftMetascript/*
-```
-
 - `Marshal` / `Unmarshal`, `Encoder` / `Decoder`, and `nbt:"name,omitempty"` struct tags, the same way `encoding/json` does it.
 - A `Tag` tree (`Compound`, `List`, `Int`, …) for data whose shape you don't know ahead of time, like `map[string]any` for JSON.
 - Gzip and zlib compressed input is detected automatically, and `Encoder.SetCompression` writes it.
