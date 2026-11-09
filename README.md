@@ -13,6 +13,7 @@ Requires Go 1.22 or newer. The library has no dependencies outside the standard 
 - Gzip and zlib compressed input is detected automatically, and `Encoder.SetCompression` writes it.
 - SNBT (the `{id:"minecraft:stone",count:1b}` syntax used in commands) both ways.
 - The `structure` package reads, writes and builds Java Edition structure (`.nbt`) files.
+- [`nbt-mcp`](cmd/nbt-mcp) is an MCP server built on it that lets a model build structure files: `go install github.com/MinecraftMetascript/nbt-go/cmd/nbt-mcp@latest`.
 
 ## Usage
 
