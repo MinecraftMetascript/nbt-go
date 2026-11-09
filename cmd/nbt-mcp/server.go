@@ -21,7 +21,9 @@ const maxVolume = 1 << 21
 
 const instructions = `Builds Minecraft Java Edition structure files (.nbt).
 
-Workflow: create_structure, then place blocks with fill, set_blocks, place_grid and the shape tools (fill_ellipsoid, fill_cylinder, fill_tube, decorate_surface), check your work with render_layer, render_view, render_image, describe_structure and lint_structure, and finish with save_structure.
+Before designing a build, read building_guide (with style=survival for practical builds a player could make, or style=creative for showpieces): it covers what makes a build look hand-crafted rather than generated, and palettes by theme. The build prompt walks through a whole build.
+
+Workflow: create_structure, then place blocks with fill, set_blocks, place_grid and the shape tools (fill_ellipsoid, fill_cylinder, fill_tube, decorate_surface), check your work with render_layer, render_view, render_image, describe_structure, critique_structure and lint_structure, and finish with save_structure.
 
 Coordinates are relative to the structure's origin and must be non-negative; x is east, y is up, z is south. Blocks use command syntax, such as "stone_bricks" or "oak_stairs[facing=east,half=bottom]"; the minecraft: namespace is optional. Anywhere a block is filled, a weighted mix such as "70%stone_bricks,20%cracked_stone_bricks,10%mossy_stone_bricks" also works; random tools take a seed and report the one they used. Block entity and entity data use SNBT, such as {LootTable:"minecraft:chests/simple_dungeon"}.
 
@@ -244,6 +246,13 @@ func newServer(s *state) *mcp.Server {
 		Name:        "assemble_jigsaw",
 		Description: "Assemble a jigsaw structure from a start piece and template pools, following the game's placement rules (attachment, priorities, depth, max distance, and the rule that pieces can't overlap), and open the result as a new structure to inspect with render_layer and describe_structure. Reports every piece placed and every jigsaw that placed nothing, with the reason. Pools come from a datapack folder or inline JSON; element locations can name open structures. Terrain, processors and terrain_matching projection are ignored.",
 	}, handler(s, s.assemble))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "critique_structure",
+		Description: "Score how hand-crafted a build looks, in survival or creative style, and list the most valuable fixes with coordinates: flat walls (depth), palette variety, share of detail blocks, silhouette, roof overhangs, foundation and colour gradient, windows and doors, asymmetry, and for survival style, lavish materials. Run it after blocking out and again after detailing; lint_structure checks correctness instead.",
+	}, handler(s, s.critique))
+
+	addGuide(srv, s)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "save_structure",
