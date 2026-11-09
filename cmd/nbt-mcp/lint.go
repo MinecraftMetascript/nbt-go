@@ -16,6 +16,9 @@ var lintChecks = []struct{ name, about string }{
 	{"renamed", "block ids that were renamed between game versions"},
 	{"connections", "walls, fences, panes and bars whose connections don't match their neighbours"},
 	{"support", "torches, lanterns, vines, signs, buttons and other blocks with nothing to attach to"},
+	{"gravity", "sand, gravel, concrete powder and other falling blocks with nothing under them"},
+	{"halves", "doors, beds and tall plants missing their other half"},
+	{"fire", "fire and lava next to blocks that burn"},
 	{"unsupported", "solid blocks with nothing anywhere below them, such as legs hanging past the edge of a plinth"},
 	{"floating", "groups of blocks that don't touch the bottom layer or anything connected to it"},
 	{"containers", "chests, barrels and other containers with no loot table or items"},
@@ -25,7 +28,7 @@ var lintChecks = []struct{ name, about string }{
 
 type lintIn struct {
 	Name   string   `json:"name"`
-	Checks []string `json:"checks,omitempty" jsonschema:"which checks to run (default all): format, renamed, connections, support, unsupported, floating, containers, valuables, jigsaw"`
+	Checks []string `json:"checks,omitempty" jsonschema:"which checks to run (default all): format, renamed, connections, support, gravity, halves, fire, unsupported, floating, containers, valuables, jigsaw"`
 	Limit  int      `json:"limit,omitempty" jsonschema:"most findings to list per check (default 10)"`
 }
 
@@ -85,6 +88,7 @@ func (s *state) lint(in lintIn) (string, error) {
 	l := &linter{st: st, g: newGrid(st), out: map[string][]finding{}}
 	checks := map[string]func(){
 		"format": l.format, "renamed": l.renamed, "connections": l.connections, "support": l.support,
+		"gravity": l.gravity, "halves": l.halves, "fire": l.fire,
 		"unsupported": l.unsupported, "floating": l.floating, "containers": l.containers,
 		"valuables": l.valuables, "jigsaw": l.jigsaw,
 	}
@@ -667,4 +671,154 @@ func (l *linter) jigsaw() {
 			l.add("jigsaw", j.pos, "%s", w)
 		}
 	}
+}
+
+func isGravityBlock(name string) bool {
+	n := strings.TrimPrefix(name, "minecraft:")
+	switch n {
+	case "sand", "red_sand", "gravel", "suspicious_sand", "suspicious_gravel", "anvil", "chipped_anvil",
+		"damaged_anvil", "dragon_egg":
+		return true
+	}
+	return strings.HasSuffix(n, "_concrete_powder")
+}
+
+// letsBlocksFall reports whether a falling block above this one would drop
+// into it, like the game's FallingBlock.isFree: air, fire, liquids and
+// replaceable plants.
+func letsBlocksFall(bs structure.BlockState) bool {
+	n := strings.TrimPrefix(bs.Name, "minecraft:")
+	switch n {
+	case "air", "cave_air", "void_air", "water", "lava", "fire", "soul_fire", "short_grass", "tall_grass",
+		"fern", "large_fern", "dead_bush", "vine", "seagrass", "tall_seagrass", "glow_lichen", "light",
+		"structure_void", "bush":
+		return true
+	case "snow":
+		return bs.Properties["layers"] == "" || bs.Properties["layers"] == "1"
+	}
+	return false
+}
+
+func (l *linter) gravity() {
+	l.blocks(func(p vec, bs structure.BlockState, _ nbt.Compound) {
+		if !isGravityBlock(bs.Name) || p[1] == 0 {
+			return
+		}
+		q := p.add(down.vec())
+		nb, _, ok := l.g.get(q)
+		switch {
+		case !ok:
+			// Unchanged world positions are only a problem if nothing below
+			// in the structure holds it up.
+			for y := q[1] - 1; y >= 0; y-- {
+				if _, _, ok := l.g.get(vec{p[0], y, p[2]}); ok {
+					l.add("gravity", p, "%s has no block under it at %v, so it will fall unless the world has something there", bs.Name, q)
+					return
+				}
+			}
+		case letsBlocksFall(nb):
+			l.add("gravity", p, "%s is above %s at %v, so it will fall as soon as it's updated", bs.Name, l.describe(q), q)
+		}
+	})
+}
+
+func (l *linter) halves() {
+	l.blocks(func(p vec, bs structure.BlockState, _ nbt.Compound) {
+		props := bs.Properties
+		if strings.HasSuffix(bs.Name, "_bed") {
+			facing, ok := parseDir(props["facing"])
+			if !ok {
+				return
+			}
+			want, other := "head", p.add(facing.vec())
+			if props["part"] == "head" {
+				want, other = "foot", p.add(facing.opposite().vec())
+			}
+			nb, _, exists := l.g.get(other)
+			if !exists || nb.Name != bs.Name || nb.Properties["part"] != want || nb.Properties["facing"] != props["facing"] {
+				l.add("halves", p, "%s needs its %s at %v (same bed, facing %s), but there is %s", bs, want, other, props["facing"], l.describe(other))
+			}
+			return
+		}
+		half := props["half"]
+		if half != "lower" && half != "upper" {
+			return
+		}
+		want, other := "upper", p.add(up.vec())
+		if half == "upper" {
+			want, other = "lower", p.add(down.vec())
+		}
+		nb, _, exists := l.g.get(other)
+		ok := exists && nb.Name == bs.Name && nb.Properties["half"] == want
+		if ok && strings.HasSuffix(bs.Name, "_door") {
+			for _, k := range []string{"facing", "hinge"} {
+				if nb.Properties[k] != props[k] {
+					l.add("halves", p, "%s and its %s half at %v disagree on %s (%s vs %s)", bs.Name, want, other, k, props[k], nb.Properties[k])
+				}
+			}
+		}
+		if !ok {
+			l.add("halves", p, "%s needs its %s half at %v, but there is %s", bs, want, other, l.describe(other))
+		}
+	})
+}
+
+// woodTypes are the overworld woods; crimson and warped wood don't burn.
+var woodTypes = []string{"oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "mangrove", "cherry", "bamboo", "pale_oak", "azalea"}
+
+// isFlammable guesses whether fire can burn or spread to a block.
+func isFlammable(name string) bool {
+	n := strings.TrimPrefix(name, "minecraft:")
+	if strings.Contains(n, "crimson") || strings.Contains(n, "warped") || strings.Contains(n, "potted") {
+		return false
+	}
+	for _, w := range woodTypes {
+		if strings.HasPrefix(n, w+"_") || strings.HasPrefix(n, "stripped_"+w+"_") {
+			return true
+		}
+	}
+	for _, f := range []string{"_wool", "_carpet", "leaves", "bookshelf", "hay_block", "tnt", "scaffolding",
+		"vine", "short_grass", "tall_grass", "fern", "dried_kelp_block", "target", "beehive", "bee_nest",
+		"lectern", "composter", "coal_block", "moss_block", "moss_carpet", "pale_moss", "_banner", "dead_bush", "sweet_berry_bush",
+		"dandelion", "poppy", "orchid", "allium", "bluet", "tulip", "daisy", "cornflower", "lily_of_the_valley",
+		"sunflower", "lilac", "rose_bush", "peony", "torchflower", "_petals", "spore_blossom", "hanging_roots",
+		"cave_vines", "big_dripleaf", "small_dripleaf", "glow_lichen", "_bed"} {
+		if strings.Contains(n, f) {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *linter) fire() {
+	l.blocks(func(p vec, bs structure.BlockState, _ nbt.Compound) {
+		var dy0, dy1, reach int
+		switch bs.Name {
+		case "minecraft:fire":
+			// Fire spreads to blocks up to one away sideways, one below and
+			// four above.
+			dy0, dy1, reach = -1, 4, 1
+		case "minecraft:lava":
+			// Lava sets fire to the air beside flammable blocks within a
+			// few blocks, mostly above it.
+			dy0, dy1, reach = -1, 2, 1
+		default:
+			return
+		}
+		var near []vec
+		for dx := -reach; dx <= reach; dx++ {
+			for dz := -reach; dz <= reach; dz++ {
+				for dy := dy0; dy <= dy1; dy++ {
+					q := p.add(vec{dx, dy, dz})
+					if nb, _, ok := l.g.get(q); ok && q != p && isFlammable(nb.Name) {
+						near = append(near, q)
+					}
+				}
+			}
+		}
+		if len(near) > 0 {
+			first, _, _ := l.g.get(near[0])
+			l.add("fire", p, "%s is within reach of %d flammable block(s), such as %s at %v, so it can start a fire", bs.Name, len(near), first.Name, near[0])
+		}
+	})
 }
