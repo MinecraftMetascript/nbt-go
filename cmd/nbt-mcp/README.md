@@ -50,6 +50,16 @@ If the client can't find the command, use the full path from `which nbt-mcp`.
 | `list_structures`    | List the open structures.                                                            |
 | `set_blocks`         | Place a batch of blocks, each with optional block entity SNBT (chest loot and so on). |
 | `fill`               | Fill a box, like `/fill`, in `replace`, `hollow` or `outline` mode.                  |
+| `fill_ellipsoid`     | A sphere or ellipsoid, solid or as a watertight shell.                               |
+| `fill_cylinder`      | A cylinder along any axis: solid, shell, open tube or ring, or a disc.               |
+| `fill_tube`          | A rounded, optionally tapering tube along a path of points (trunks, roots, pipes).   |
+| `decorate_surface`   | Put a block on, or swap in for, the exposed faces of solid blocks (moss, snow, vines, grass). |
+| `place_grid`         | Place many blocks from text layers and a legend, the inverse of `render_layer`.      |
+| `check_sealed`       | Flood-fill from a point to check that a space is watertight, and find the gap if it isn't. |
+| `transform_structure`| Rotate and/or mirror a structure in place, turning block states to match.            |
+| `paste_structure`    | Copy one structure into another, optionally rotated or mirrored.                     |
+| `crop_structure`     | Cut a structure down to a box.                                                       |
+| `set_size`           | Set the size explicitly, to add margin or trim.                                      |
 | `remove_blocks`      | Clear a box back to "no block", so placing the structure leaves the world unchanged there. |
 | `add_entity`         | Add an entity with optional SNBT.                                                    |
 | `describe_structure` | Size, block counts by type, entities, and jigsaw blocks with warnings.               |
@@ -59,7 +69,9 @@ If the client can't find the command, use the full path from `which nbt-mcp`.
 | `assemble_jigsaw`    | Assemble a whole jigsaw layout from a start piece and template pools, and open the result. |
 | `save_structure`     | Write a gzip-compressed `.nbt` file.                                                 |
 
-Blocks use command syntax (`oak_stairs[facing=east,half=bottom]`), and the `minecraft:` namespace is optional.
+Blocks use command syntax (`oak_stairs[facing=east,half=bottom]`), and the `minecraft:` namespace is optional. Wherever a tool fills an area, the block can also be a weighted mix such as `70%stone_bricks,20%cracked_stone_bricks,10%mossy_stone_bricks` (`3*stone,1*andesite` works too). Every random tool takes a `seed` and reports the seed it used, so a result can be reproduced.
+
+Hollow shapes are watertight: every inside position is cut off from the outside on all six faces, so water and mobs can't get through diagonal gaps. By default the inside is filled with air, which clears out water or terrain when the structure is placed.
 
 ## Jigsaw structures
 

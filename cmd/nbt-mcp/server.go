@@ -21,9 +21,9 @@ const maxVolume = 1 << 21
 
 const instructions = `Builds Minecraft Java Edition structure files (.nbt).
 
-Workflow: create_structure, then place blocks with fill and set_blocks, check your work with render_layer and describe_structure, and finish with save_structure.
+Workflow: create_structure, then place blocks with fill, set_blocks, place_grid and the shape tools (fill_ellipsoid, fill_cylinder, fill_tube, decorate_surface), check your work with render_layer and describe_structure, and finish with save_structure.
 
-Coordinates are relative to the structure's origin and must be non-negative; x is east, y is up, z is south. Blocks use command syntax, such as "stone_bricks" or "oak_stairs[facing=east,half=bottom]"; the minecraft: namespace is optional. Block entity and entity data use SNBT, such as {LootTable:"minecraft:chests/simple_dungeon"}.
+Coordinates are relative to the structure's origin and must be non-negative; x is east, y is up, z is south. Blocks use command syntax, such as "stone_bricks" or "oak_stairs[facing=east,half=bottom]"; the minecraft: namespace is optional. Anywhere a block is filled, a weighted mix such as "70%stone_bricks,20%cracked_stone_bricks,10%mossy_stone_bricks" also works; random tools take a seed and report the one they used. Block entity and entity data use SNBT, such as {LootTable:"minecraft:chests/simple_dungeon"}.
 
 Positions without a block leave the world unchanged when the structure is placed. Use minecraft:air to clear space.
 
@@ -137,8 +137,58 @@ func newServer(s *state) *mcp.Server {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "fill",
-		Description: "Fill a box with one block, like the /fill command. Corners are inclusive. Mode \"replace\" fills the whole box, \"hollow\" fills the shell and puts air inside, and \"outline\" fills only the shell and leaves the inside unchanged.",
+		Description: "Fill a box with one block or a weighted mix, like the /fill command. Corners are inclusive. Mode \"replace\" fills the whole box, \"hollow\" fills the shell and puts air inside, and \"outline\" fills only the shell and leaves the inside unchanged.",
 	}, handler(s, s.fill))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "fill_ellipsoid",
+		Description: "Fill a sphere or ellipsoid, solid or as a watertight hollow shell. Good for domes, boulders, bushes, caves and organic bodies.",
+	}, handler(s, s.ellipsoid))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "fill_cylinder",
+		Description: "Fill a cylinder along x, y or z: solid, a hollow shell, a tube or ring (hollow with open_ends), or a disc (height 1). Cross-sections can be elliptical.",
+	}, handler(s, s.cylinder))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "fill_tube",
+		Description: "Fill a rounded tube along a path of points, optionally tapering from one radius to another. Good for trunks, branches, roots, tentacles, pipes and curved tunnels.",
+	}, handler(s, s.tube))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "decorate_surface",
+		Description: "Apply a block to the exposed faces of solid blocks, like a decal: moss or snow on top surfaces, vines or glow lichen on walls, grass on the top of a mound. Can be limited to a box, to certain blocks, and to a random fraction of positions.",
+	}, handler(s, s.decorate))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "place_grid",
+		Description: "Place many blocks at once from text layers and a legend, in the same layout render_layer draws: each layer is a list of rows from north to south, each character one block going east. Much more compact than set_blocks for detailed builds.",
+	}, handler(s, s.placeGrid))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "check_sealed",
+		Description: "Check that a space is watertight: flood-fill from a position through everything that isn't a full block and report whether it reaches the outside, and where the likely gap is.",
+	}, handler(s, s.checkSealed))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "transform_structure",
+		Description: "Rotate and/or mirror a whole structure in place, turning block states (facing, axis, connections, rails, stairs) and entities to match.",
+	}, handler(s, s.transformStructure))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "paste_structure",
+		Description: "Copy one open structure into another at a position, optionally rotated or mirrored. Use it to merge parts built separately or repeat a module.",
+	}, handler(s, s.pasteStructure))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "crop_structure",
+		Description: "Cut a structure down to a box (inclusive corners), moving that box to the origin. Optionally keep the original and open the cropped copy under a new name.",
+	}, handler(s, s.crop))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "set_size",
+		Description: "Set a structure's size explicitly, to add empty margin or trim it. Shrinking refuses to cut off blocks unless drop is set.",
+	}, handler(s, s.setSize))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "remove_blocks",
@@ -310,8 +360,9 @@ func (b boxIn) bounds() (lo, hi [3]int, err error) {
 
 type fillIn struct {
 	boxIn
-	Block string `json:"block" jsonschema:"block in command syntax, e.g. stone_bricks or oak_planks"`
+	Block string `json:"block" jsonschema:"block in command syntax, e.g. stone_bricks, or a weighted mix such as 70%stone_bricks,30%cracked_stone_bricks"`
 	Mode  string `json:"mode,omitempty" jsonschema:"replace (default), hollow, or outline"`
+	Seed  *int64 `json:"seed,omitempty" jsonschema:"random seed for block mixes; a random one is used and reported if omitted"`
 }
 
 func (s *state) fill(in fillIn) (string, error) {
@@ -319,10 +370,11 @@ func (s *state) fill(in fillIn) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	bs, err := structure.ParseBlockState(in.Block)
+	pat, err := parsePattern(in.Block)
 	if err != nil {
 		return "", err
 	}
+	rng, seed := newRNG(in.Seed)
 	lo, hi, err := in.bounds()
 	if err != nil {
 		return "", err
@@ -340,7 +392,7 @@ func (s *state) fill(in fillIn) (string, error) {
 		for y := lo[1]; y <= hi[1]; y++ {
 			for z := lo[2]; z <= hi[2]; z++ {
 				edge := x == lo[0] || x == hi[0] || y == lo[1] || y == hi[1] || z == lo[2] || z == hi[2]
-				place := bs
+				place := pat.pick(rng)
 				if !edge {
 					switch mode {
 					case "hollow":
@@ -356,7 +408,11 @@ func (s *state) fill(in fillIn) (string, error) {
 			}
 		}
 	}
-	return fmt.Sprintf("Filled %d positions from %v to %v with %s (%s). Size is now %v.", n, lo, hi, bs, mode, st.Size), nil
+	msg := fmt.Sprintf("Filled %d positions from %v to %v with %s (%s)", n, lo, hi, pat, mode)
+	if pat.random() {
+		msg += fmt.Sprintf(", seed %d", seed)
+	}
+	return msg + fmt.Sprintf(". Size is now %v.", st.Size), nil
 }
 
 func (s *state) remove(in boxIn) (string, error) {

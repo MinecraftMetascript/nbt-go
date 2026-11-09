@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MinecraftMetascript/nbt-go"
 	"github.com/MinecraftMetascript/nbt-go/structure"
 )
 
@@ -570,18 +569,7 @@ func (a *assembler) merge() (*structure.Structure, error) {
 			}
 		}
 		for _, e := range st.Entities {
-			fo := [3]float64{float64(p.offset[0] + shift[0]), float64(p.offset[1] + shift[1]), float64(p.offset[2] + shift[2])}
-			pos := p.rot.applyF(e.Pos)
-			for k := 0; k < 3; k++ {
-				pos[k] += fo[k]
-			}
-			data := cloneCompound(e.NBT)
-			data["Pos"] = nbt.List{nbt.Double(pos[0]), nbt.Double(pos[1]), nbt.Double(pos[2])}
-			if rl, ok := data["Rotation"].(nbt.List); ok && len(rl) == 2 {
-				if yaw, ok := rl[0].(nbt.Float); ok {
-					rl[0] = nbt.Float(float32(yaw) + 90*float32(p.rot&3))
-				}
-			}
+			pos, data := transform{rot: p.rot}.entity(e, p.offset.add(shift))
 			if err := out.AddEntity(pos, data); err != nil {
 				return nil, err
 			}
