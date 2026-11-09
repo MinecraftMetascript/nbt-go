@@ -1,0 +1,575 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/MinecraftMetascript/nbt-go"
+	"github.com/MinecraftMetascript/nbt-go/structure"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// maxVolume bounds how many positions one fill or remove call may touch, so a
+// typo in a coordinate cannot exhaust memory.
+const maxVolume = 1 << 21
+
+const instructions = `Builds Minecraft Java Edition structure files (.nbt).
+
+Workflow: create_structure, then place blocks with fill and set_blocks, check your work with render_layer and describe_structure, and finish with save_structure.
+
+Coordinates are relative to the structure's origin and must be non-negative; x is east, y is up, z is south. Blocks use command syntax, such as "stone_bricks" or "oak_stairs[facing=east,half=bottom]"; the minecraft: namespace is optional. Block entity and entity data use SNBT, such as {LootTable:"minecraft:chests/simple_dungeon"}.
+
+Positions without a block leave the world unchanged when the structure is placed. Use minecraft:air to clear space.`
+
+type state struct {
+	mu          sync.Mutex
+	dir         string
+	dataVersion int32
+	structures  map[string]*structure.Structure
+}
+
+func newState(dir string, dataVersion int32) *state {
+	return &state{dir: dir, dataVersion: dataVersion, structures: map[string]*structure.Structure{}}
+}
+
+func (s *state) get(name string) (*structure.Structure, error) {
+	st, ok := s.structures[name]
+	if !ok {
+		names := s.names()
+		if len(names) == 0 {
+			return nil, fmt.Errorf("no structure named %q; create one with create_structure", name)
+		}
+		return nil, fmt.Errorf("no structure named %q; open structures: %s", name, strings.Join(names, ", "))
+	}
+	return st, nil
+}
+
+func (s *state) names() []string {
+	names := make([]string, 0, len(s.structures))
+	for n := range s.structures {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (s *state) resolve(path string) (string, error) {
+	if path == "" {
+		return "", errors.New("path is required")
+	}
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(home, path[2:])
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(s.dir, path)
+	}
+	return filepath.Clean(path), nil
+}
+
+func text(format string, args ...any) *mcp.CallToolResult {
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf(format, args...)}}}
+}
+
+// handler adapts a function returning text to an MCP tool handler, holding
+// the state lock for the duration of the call.
+func handler[In any](s *state, f func(In) (string, error)) mcp.ToolHandlerFor[In, any] {
+	return func(_ context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		out, err := f(in)
+		if err != nil {
+			return nil, nil, err
+		}
+		return text("%s", out), nil, nil
+	}
+}
+
+func parseSNBT(s string) (nbt.Compound, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	t, err := nbt.ParseSNBT(s)
+	if err != nil {
+		return nil, err
+	}
+	c, ok := t.(nbt.Compound)
+	if !ok {
+		return nil, fmt.Errorf("NBT must be a compound like {key:value}, got %v", t.Type())
+	}
+	return c, nil
+}
+
+func newServer(s *state) *mcp.Server {
+	srv := mcp.NewServer(&mcp.Implementation{Name: "nbt-mcp", Title: "Minecraft structure builder", Version: version()},
+		&mcp.ServerOptions{Instructions: instructions})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "create_structure",
+		Description: "Start a new, empty structure in memory. Replaces any open structure with the same name.",
+	}, handler(s, s.create))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "load_structure",
+		Description: "Open an existing .nbt structure file for viewing or editing.",
+	}, handler(s, s.load))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "list_structures",
+		Description: "List the structures currently open in memory.",
+	}, handler(s, s.list))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "set_blocks",
+		Description: "Place individual blocks, replacing whatever is at each position. Use this for details such as doors, stairs, chests and torches.",
+	}, handler(s, s.setBlocks))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "fill",
+		Description: "Fill a box with one block, like the /fill command. Corners are inclusive. Mode \"replace\" fills the whole box, \"hollow\" fills the shell and puts air inside, and \"outline\" fills only the shell and leaves the inside unchanged.",
+	}, handler(s, s.fill))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "remove_blocks",
+		Description: "Remove blocks from a box (inclusive corners), so those positions are left unchanged when the structure is placed. This is not the same as placing air.",
+	}, handler(s, s.remove))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "add_entity",
+		Description: "Add an entity, such as an armor stand, villager or item frame.",
+	}, handler(s, s.addEntity))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "describe_structure",
+		Description: "Summarize a structure: size, block counts by type, entities and block entities.",
+	}, handler(s, s.describe))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "render_layer",
+		Description: "Draw one horizontal layer (a fixed y) as a top-down text grid, one character per block, with a legend. Rows are z (north at the top), columns are x (west on the left). Use it to check your work.",
+	}, handler(s, s.render))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "save_structure",
+		Description: "Write a structure to a gzip-compressed .nbt file. To use it in a world, save to <world>/generated/<namespace>/structure/<name>.nbt (\"structures\" before 1.21) and load it with a structure block or /place template <namespace>:<name>.",
+	}, handler(s, s.save))
+
+	return srv
+}
+
+type createIn struct {
+	Name        string `json:"name" jsonschema:"name to refer to the structure by in other tools"`
+	DataVersion int32  `json:"data_version,omitempty" jsonschema:"DataVersion of the target Minecraft version, e.g. 4189 for 1.21.4; defaults to the server's setting"`
+}
+
+func (s *state) create(in createIn) (string, error) {
+	if in.Name == "" {
+		return "", errors.New("name is required")
+	}
+	v := in.DataVersion
+	if v == 0 {
+		v = s.dataVersion
+	}
+	s.structures[in.Name] = structure.New(v)
+	return fmt.Sprintf("Created empty structure %q (DataVersion %d).", in.Name, v), nil
+}
+
+type loadIn struct {
+	Name string `json:"name" jsonschema:"name to refer to the structure by in other tools"`
+	Path string `json:"path" jsonschema:"path of the .nbt file; relative paths are resolved against the server's directory"`
+}
+
+func (s *state) load(in loadIn) (string, error) {
+	if in.Name == "" {
+		return "", errors.New("name is required")
+	}
+	path, err := s.resolve(in.Path)
+	if err != nil {
+		return "", err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	st, err := structure.Read(f)
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", path, err)
+	}
+	s.structures[in.Name] = st
+	return fmt.Sprintf("Loaded %s as %q.\n\n%s", path, in.Name, summarize(st)), nil
+}
+
+type listIn struct{}
+
+func (s *state) list(listIn) (string, error) {
+	if len(s.structures) == 0 {
+		return "No structures are open.", nil
+	}
+	var b strings.Builder
+	for _, n := range s.names() {
+		st := s.structures[n]
+		fmt.Fprintf(&b, "%s: size %dx%dx%d, %d blocks, %d entities\n", n, st.Size[0], st.Size[1], st.Size[2], len(st.Blocks), len(st.Entities))
+	}
+	return b.String(), nil
+}
+
+type blockIn struct {
+	X     int    `json:"x"`
+	Y     int    `json:"y"`
+	Z     int    `json:"z"`
+	Block string `json:"block" jsonschema:"block in command syntax, e.g. oak_stairs[facing=east,half=bottom]"`
+	NBT   string `json:"nbt,omitempty" jsonschema:"block entity data as SNBT, e.g. {LootTable:\"minecraft:chests/simple_dungeon\"}"`
+}
+
+type setBlocksIn struct {
+	Name   string    `json:"name"`
+	Blocks []blockIn `json:"blocks" jsonschema:"blocks to place"`
+}
+
+func (s *state) setBlocks(in setBlocksIn) (string, error) {
+	st, err := s.get(in.Name)
+	if err != nil {
+		return "", err
+	}
+	// Validate everything first so a bad entry leaves the structure unchanged.
+	type placement struct {
+		x, y, z int
+		state   structure.BlockState
+		data    nbt.Compound
+	}
+	ps := make([]placement, len(in.Blocks))
+	for i, b := range in.Blocks {
+		bs, err := structure.ParseBlockState(b.Block)
+		if err != nil {
+			return "", fmt.Errorf("blocks[%d]: %w", i, err)
+		}
+		data, err := parseSNBT(b.NBT)
+		if err != nil {
+			return "", fmt.Errorf("blocks[%d].nbt: %w", i, err)
+		}
+		if b.X < 0 || b.Y < 0 || b.Z < 0 {
+			return "", fmt.Errorf("blocks[%d]: coordinates must be non-negative, got (%d, %d, %d)", i, b.X, b.Y, b.Z)
+		}
+		ps[i] = placement{b.X, b.Y, b.Z, bs, data}
+	}
+	for _, p := range ps {
+		if err := st.SetBlock(p.x, p.y, p.z, p.state, p.data); err != nil {
+			return "", err
+		}
+	}
+	return fmt.Sprintf("Placed %d blocks. Size is now %v.", len(ps), st.Size), nil
+}
+
+type boxIn struct {
+	Name string `json:"name"`
+	From [3]int `json:"from" jsonschema:"first corner [x, y, z]"`
+	To   [3]int `json:"to" jsonschema:"opposite corner [x, y, z], inclusive"`
+}
+
+func (b boxIn) bounds() (lo, hi [3]int, err error) {
+	vol := 1
+	for a := 0; a < 3; a++ {
+		lo[a], hi[a] = min(b.From[a], b.To[a]), max(b.From[a], b.To[a])
+		if lo[a] < 0 {
+			return lo, hi, fmt.Errorf("coordinates must be non-negative, got from %v to %v", b.From, b.To)
+		}
+		vol *= hi[a] - lo[a] + 1
+		if vol > maxVolume {
+			return lo, hi, fmt.Errorf("box from %v to %v covers more than %d blocks", b.From, b.To, maxVolume)
+		}
+	}
+	return lo, hi, nil
+}
+
+type fillIn struct {
+	boxIn
+	Block string `json:"block" jsonschema:"block in command syntax, e.g. stone_bricks or oak_planks"`
+	Mode  string `json:"mode,omitempty" jsonschema:"replace (default), hollow, or outline"`
+}
+
+func (s *state) fill(in fillIn) (string, error) {
+	st, err := s.get(in.Name)
+	if err != nil {
+		return "", err
+	}
+	bs, err := structure.ParseBlockState(in.Block)
+	if err != nil {
+		return "", err
+	}
+	lo, hi, err := in.bounds()
+	if err != nil {
+		return "", err
+	}
+	mode := in.Mode
+	if mode == "" {
+		mode = "replace"
+	}
+	if mode != "replace" && mode != "hollow" && mode != "outline" {
+		return "", fmt.Errorf("unknown mode %q; use replace, hollow or outline", in.Mode)
+	}
+	air := structure.BlockState{Name: "minecraft:air"}
+	n := 0
+	for x := lo[0]; x <= hi[0]; x++ {
+		for y := lo[1]; y <= hi[1]; y++ {
+			for z := lo[2]; z <= hi[2]; z++ {
+				edge := x == lo[0] || x == hi[0] || y == lo[1] || y == hi[1] || z == lo[2] || z == hi[2]
+				place := bs
+				if !edge {
+					switch mode {
+					case "hollow":
+						place = air
+					case "outline":
+						continue
+					}
+				}
+				if err := st.SetBlock(x, y, z, place, nil); err != nil {
+					return "", err
+				}
+				n++
+			}
+		}
+	}
+	return fmt.Sprintf("Filled %d positions from %v to %v with %s (%s). Size is now %v.", n, lo, hi, bs, mode, st.Size), nil
+}
+
+func (s *state) remove(in boxIn) (string, error) {
+	st, err := s.get(in.Name)
+	if err != nil {
+		return "", err
+	}
+	lo, hi, err := in.bounds()
+	if err != nil {
+		return "", err
+	}
+	n := 0
+	for x := lo[0]; x <= hi[0]; x++ {
+		for y := lo[1]; y <= hi[1]; y++ {
+			for z := lo[2]; z <= hi[2]; z++ {
+				if st.RemoveBlock(x, y, z) {
+					n++
+				}
+			}
+		}
+	}
+	return fmt.Sprintf("Removed %d blocks.", n), nil
+}
+
+type entityIn struct {
+	Name string     `json:"name"`
+	Pos  [3]float64 `json:"pos" jsonschema:"position [x, y, z]; use .5 to center in a block"`
+	ID   string     `json:"id" jsonschema:"entity id, e.g. armor_stand or villager"`
+	NBT  string     `json:"nbt,omitempty" jsonschema:"extra entity data as SNBT, e.g. {CustomName:'\"Guard\"',NoAI:1b}"`
+}
+
+func (s *state) addEntity(in entityIn) (string, error) {
+	st, err := s.get(in.Name)
+	if err != nil {
+		return "", err
+	}
+	data, err := parseSNBT(in.NBT)
+	if err != nil {
+		return "", fmt.Errorf("nbt: %w", err)
+	}
+	if data == nil {
+		data = nbt.Compound{}
+	}
+	id := in.ID
+	if id == "" {
+		return "", errors.New("id is required")
+	}
+	if !strings.Contains(id, ":") {
+		id = "minecraft:" + id
+	}
+	data["id"] = nbt.String(id)
+	pos := make(nbt.List, 3)
+	for a := range pos {
+		pos[a] = nbt.Double(in.Pos[a])
+	}
+	data["Pos"] = pos
+	if err := st.AddEntity(in.Pos, data); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Added %s at %v.", id, in.Pos), nil
+}
+
+type nameIn struct {
+	Name string `json:"name"`
+}
+
+func (s *state) describe(in nameIn) (string, error) {
+	st, err := s.get(in.Name)
+	if err != nil {
+		return "", err
+	}
+	return summarize(st), nil
+}
+
+func summarize(st *structure.Structure) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "DataVersion %d, size %d x %d x %d (x, y, z), %d blocks, %d entities.\n",
+		st.DataVersion, st.Size[0], st.Size[1], st.Size[2], len(st.Blocks), len(st.Entities))
+	if len(st.Palettes) > 0 {
+		fmt.Fprintf(&b, "Has %d palette variants; counts use the first.\n", len(st.Palettes))
+	}
+	palette := st.Palette
+	if len(st.Palettes) > 0 {
+		palette = st.Palettes[0]
+	}
+	counts := make([]int, len(palette))
+	withNBT := 0
+	for _, bl := range st.Blocks {
+		if int(bl.State) < len(counts) {
+			counts[bl.State]++
+		}
+		if len(bl.NBT) > 0 {
+			withNBT++
+		}
+	}
+	order := make([]int, 0, len(palette))
+	for i := range palette {
+		if counts[i] > 0 {
+			order = append(order, i)
+		}
+	}
+	sort.SliceStable(order, func(i, j int) bool { return counts[order[i]] > counts[order[j]] })
+	if len(order) > 0 {
+		b.WriteString("\nBlocks:\n")
+		for _, i := range order {
+			fmt.Fprintf(&b, "  %6d  %s\n", counts[i], palette[i])
+		}
+	}
+	if withNBT > 0 {
+		fmt.Fprintf(&b, "\n%d blocks have block entity data.\n", withNBT)
+	}
+	if len(st.Entities) > 0 {
+		b.WriteString("\nEntities:\n")
+		for _, e := range st.Entities {
+			fmt.Fprintf(&b, "  %v at %v\n", e.NBT["id"], e.Pos)
+		}
+	}
+	return b.String()
+}
+
+type renderIn struct {
+	Name string `json:"name"`
+	Y    int    `json:"y" jsonschema:"the layer to draw"`
+}
+
+// glyphs are assigned to block types in order of first appearance on a layer.
+const glyphs = "#ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@$%&*+=?!<>/|~^"
+
+func (s *state) render(in renderIn) (string, error) {
+	st, err := s.get(in.Name)
+	if err != nil {
+		return "", err
+	}
+	if in.Y < 0 || in.Y >= int(st.Size[1]) {
+		return "", fmt.Errorf("y=%d is outside the structure, which spans y=0..%d", in.Y, st.Size[1]-1)
+	}
+	w, d := int(st.Size[0]), int(st.Size[2])
+	if w*d > 128*128 {
+		return "", fmt.Errorf("layer is %dx%d, too large to render (max 128x128)", w, d)
+	}
+	grid := make([][]byte, d)
+	for z := range grid {
+		grid[z] = []byte(strings.Repeat(".", w))
+	}
+	glyphOf := map[string]byte{}
+	var legend []string
+	for z := 0; z < d; z++ {
+		for x := 0; x < w; x++ {
+			bs, _, ok := st.Block(x, in.Y, z)
+			if !ok {
+				continue
+			}
+			key := bs.String()
+			if bs.Name == "minecraft:air" {
+				grid[z][x] = ' '
+				continue
+			}
+			g, seen := glyphOf[key]
+			if !seen {
+				if len(glyphOf) < len(glyphs) {
+					g = glyphs[len(glyphOf)]
+				} else {
+					g = '?'
+				}
+				glyphOf[key] = g
+				legend = append(legend, fmt.Sprintf("  %c  %s", g, key))
+			}
+			grid[z][x] = g
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Layer y=%d of %q (%d wide on x, %d deep on z). North is up.\n\n", in.Y, in.Name, w, d)
+	// Column ruler, units digit of x.
+	b.WriteString("     ")
+	for x := 0; x < w; x++ {
+		b.WriteByte(byte('0' + x%10))
+	}
+	b.WriteByte('\n')
+	for z := 0; z < d; z++ {
+		fmt.Fprintf(&b, "%4d %s\n", z, grid[z])
+	}
+	b.WriteString("\nLegend:\n")
+	for _, l := range legend {
+		b.WriteString(l + "\n")
+	}
+	b.WriteString("  .  no block (world left unchanged)\n  ' ' (space) minecraft:air\n")
+	return b.String(), nil
+}
+
+type saveIn struct {
+	Name string `json:"name"`
+	Path string `json:"path" jsonschema:"where to write the file; .nbt is added if missing; relative paths are resolved against the server's directory"`
+}
+
+func (s *state) save(in saveIn) (string, error) {
+	st, err := s.get(in.Name)
+	if err != nil {
+		return "", err
+	}
+	path, err := s.resolve(in.Path)
+	if err != nil {
+		return "", err
+	}
+	if filepath.Ext(path) != ".nbt" {
+		path += ".nbt"
+	}
+	if err := st.Validate(); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".nbt-mcp-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(tmp.Name())
+	if err := st.Write(tmp); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return "", err
+	}
+	note := ""
+	if st.Size[0] > 48 || st.Size[1] > 48 || st.Size[2] > 48 {
+		note = "\nNote: it is larger than 48 blocks on some axis, so a structure block cannot load all of it; use /place template instead."
+	}
+	return fmt.Sprintf("Saved %q (%d x %d x %d, %d blocks) to %s.%s", in.Name, st.Size[0], st.Size[1], st.Size[2], len(st.Blocks), path, note), nil
+}

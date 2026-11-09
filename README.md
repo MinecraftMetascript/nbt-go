@@ -3,14 +3,17 @@
 A Go library for Minecraft's [NBT](https://minecraft.wiki/w/NBT_format) format, modeled on `encoding/json`.
 
 ```sh
-go get github.com/MinecraftMetascript/nbt-go
+go get github.com/MinecraftMetascript/nbt-go@latest
 ```
+
+Requires Go 1.22 or newer. The library has no dependencies outside the standard library.
 
 - `Marshal` / `Unmarshal`, `Encoder` / `Decoder`, and `nbt:"name,omitempty"` struct tags, the same way `encoding/json` does it.
 - A `Tag` tree (`Compound`, `List`, `Int`, …) for data whose shape you don't know ahead of time, like `map[string]any` for JSON.
 - Gzip and zlib compressed input is detected automatically, and `Encoder.SetCompression` writes it.
 - SNBT (the `{id:"minecraft:stone",count:1b}` syntax used in commands) both ways.
 - The `structure` package reads, writes and builds Java Edition structure (`.nbt`) files.
+- [`nbt-mcp`](cmd/nbt-mcp) is an MCP server built on it that lets a model build structure files: `go install github.com/MinecraftMetascript/nbt-go/cmd/nbt-mcp@latest`.
 
 ## Usage
 
@@ -112,6 +115,17 @@ err := s.Write(f) // gzip compressed, ready for a structure block or data pack
 `structure.Read` loads existing files, including vanilla ones with multiple palettes (shipwrecks and similar). Positions with no block are left alone when the structure is placed, like `minecraft:structure_void`; place `minecraft:air` to clear a space.
 
 Minecraft 26.3 (DataVersion 5009) renamed the palette keys from `Name`/`Properties` to `id`/`properties`. Both are read, and the structure is written with the keys that match its `DataVersion`.
+
+## Developing alongside another project
+
+To use a local checkout from another module (for example the MCP server) without publishing, use a Go workspace in the parent directory:
+
+```sh
+git clone https://github.com/MinecraftMetascript/nbt-go
+go work init ./your-project ./nbt-go
+```
+
+Imports of `github.com/MinecraftMetascript/nbt-go` in `your-project` now resolve to the local checkout. Don't commit `go.work`. To try an unmerged change without cloning it, run `go get github.com/MinecraftMetascript/nbt-go@<commit-sha>`. Branch names that contain a `/` can't be used as versions.
 
 ## Scope
 
