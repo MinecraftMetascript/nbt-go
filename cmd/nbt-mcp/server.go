@@ -21,7 +21,7 @@ const maxVolume = 1 << 21
 
 const instructions = `Builds Minecraft Java Edition structure files (.nbt).
 
-Workflow: create_structure, then place blocks with fill, set_blocks, place_grid and the shape tools (fill_ellipsoid, fill_cylinder, fill_tube, decorate_surface), check your work with render_layer, render_view, render_image and describe_structure, and finish with save_structure.
+Workflow: create_structure, then place blocks with fill, set_blocks, place_grid and the shape tools (fill_ellipsoid, fill_cylinder, fill_tube, decorate_surface), check your work with render_layer, render_view, render_image, describe_structure and lint_structure, and finish with save_structure.
 
 Coordinates are relative to the structure's origin and must be non-negative; x is east, y is up, z is south. Blocks use command syntax, such as "stone_bricks" or "oak_stairs[facing=east,half=bottom]"; the minecraft: namespace is optional. Anywhere a block is filled, a weighted mix such as "70%stone_bricks,20%cracked_stone_bricks,10%mossy_stone_bricks" also works; random tools take a seed and report the one they used. Block entity and entity data use SNBT, such as {LootTable:"minecraft:chests/simple_dungeon"}.
 
@@ -209,6 +209,11 @@ func newServer(s *state) *mcp.Server {
 		Name:        "render_layer",
 		Description: "Draw one horizontal layer (a fixed y) as a top-down text grid, one character per block, with a legend. Rows are z (north at the top), columns are x (west on the left). Use it to check your work.",
 	}, handler(s, s.render))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lint_structure",
+		Description: "Check a structure for common mistakes: file format problems, block ids renamed between versions, walls and fences that don't connect, torches, lanterns and vines with nothing to attach to, blocks with nothing below them (legs hanging off a plinth), floating groups, containers with no loot table, high-value blocks players could mine, and jigsaw settings. Run it before saving.",
+	}, handler(s, s.lint))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "render_view",
