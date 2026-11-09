@@ -52,11 +52,26 @@ If the client can't find the command, use the full path from `which nbt-mcp`.
 | `fill`               | Fill a box, like `/fill`, in `replace`, `hollow` or `outline` mode.                  |
 | `remove_blocks`      | Clear a box back to "no block", so placing the structure leaves the world unchanged there. |
 | `add_entity`         | Add an entity with optional SNBT.                                                    |
-| `describe_structure` | Size, block counts by type, and entities.                                            |
+| `describe_structure` | Size, block counts by type, entities, and jigsaw blocks with warnings.               |
 | `render_layer`       | A top-down text drawing of one y layer, so the model can check its work.            |
+| `place_jigsaw`       | Place a jigsaw block with typed settings. `final_state` defaults to the block it replaces. |
+| `check_jigsaw_fit`   | Check where a child piece lands on a parent's jigsaws in each rotation, and whether it fits. |
+| `assemble_jigsaw`    | Assemble a whole jigsaw layout from a start piece and template pools, and open the result. |
 | `save_structure`     | Write a gzip-compressed `.nbt` file.                                                 |
 
 Blocks use command syntax (`oak_stairs[facing=east,half=bottom]`), and the `minecraft:` namespace is optional.
+
+## Jigsaw structures
+
+The jigsaw tools follow the game's placement code (`JigsawPlacement`) for rigid pieces. The rules that most often cause surprises:
+
+- **Attachment.** A child's jigsaw lands in the block directly in front of the parent's jigsaw, so the two jigsaw blocks end up adjacent and facing each other. The parent's `target` must equal the child jigsaw's `name`. Up and down jigsaws with an `aligned` joint also need matching tops; `rollable` lets the child spin.
+- **Connecting inside a piece.** If a jigsaw faces into its own piece's bounding box (a statue on a plinth whose box includes the air above it), the whole child must fit inside that box, minus anything else already placed inside it. Otherwise the game quietly places nothing. `check_jigsaw_fit` shows how far a child sticks out.
+- **No overlaps.** Children that connect outside their parent must not overlap any other piece, and must stay within `max_distance_from_center` of the start piece.
+- **Final state.** After generation each jigsaw is replaced by its `final_state`. The game's default is air, which leaves a hole in a floor or wall. `place_jigsaw` defaults it to the block the jigsaw replaces.
+- **Start height.** With `project_start_to_heightmap` (as villages use), the start piece's bottom layer (y=0) is placed at the height of the topmost terrain block, replacing it. So y=0 is sunk one block into the ground and y=1 is the first layer above it. Build y=0 as a foundation, or set `start_height` to 1.
+
+`assemble_jigsaw` reads template pools from a datapack folder (`data/<ns>/worldgen/template_pool/`) or from inline JSON in the same format, and finds pieces among the open structures or in the datapack's `data/<ns>/structure/` folder. It ignores terrain, processors, and `terrain_matching` height changes, so use it to check how pieces connect, not how they sit on the ground.
 
 ## Using the files in a world
 

@@ -55,8 +55,8 @@ func TestListTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"add_entity", "create_structure", "describe_structure", "fill", "list_structures",
-		"load_structure", "remove_blocks", "render_layer", "save_structure", "set_blocks"}
+	want := []string{"add_entity", "assemble_jigsaw", "check_jigsaw_fit", "create_structure", "describe_structure", "fill", "list_structures",
+		"load_structure", "place_jigsaw", "remove_blocks", "render_layer", "save_structure", "set_blocks"}
 	var got []string
 	for _, tool := range res.Tools {
 		got = append(got, tool.Name)

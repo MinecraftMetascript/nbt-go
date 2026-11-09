@@ -25,7 +25,9 @@ Workflow: create_structure, then place blocks with fill and set_blocks, check yo
 
 Coordinates are relative to the structure's origin and must be non-negative; x is east, y is up, z is south. Blocks use command syntax, such as "stone_bricks" or "oak_stairs[facing=east,half=bottom]"; the minecraft: namespace is optional. Block entity and entity data use SNBT, such as {LootTable:"minecraft:chests/simple_dungeon"}.
 
-Positions without a block leave the world unchanged when the structure is placed. Use minecraft:air to clear space.`
+Positions without a block leave the world unchanged when the structure is placed. Use minecraft:air to clear space.
+
+Jigsaw structures: add jigsaw blocks with place_jigsaw, check them with describe_structure (which lists and lints them), check that a child piece fits its parent with check_jigsaw_fit, and preview a whole layout with assemble_jigsaw. A child's jigsaw lands in the block directly in front of the parent's jigsaw: the two jigsaw blocks end up adjacent and face to face. When a jigsaw faces into its own piece's bounding box, the entire child piece must fit inside that box. A start piece placed with project_start_to_heightmap (as villages are) has its y=0 layer at the height of the topmost terrain block, replacing it, so y=0 is sunk one block into the ground and y=1 is the first layer above it; build y=0 as a foundation or raise start_height by 1.`
 
 type state struct {
 	mu          sync.Mutex
@@ -150,13 +152,28 @@ func newServer(s *state) *mcp.Server {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "describe_structure",
-		Description: "Summarize a structure: size, block counts by type, entities and block entities.",
+		Description: "Summarize a structure: size, block counts by type, entities, block entities, and its jigsaw blocks with warnings about likely mistakes.",
 	}, handler(s, s.describe))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "render_layer",
 		Description: "Draw one horizontal layer (a fixed y) as a top-down text grid, one character per block, with a legend. Rows are z (north at the top), columns are x (west on the left). Use it to check your work.",
 	}, handler(s, s.render))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "place_jigsaw",
+		Description: "Place a jigsaw block with its settings (name, target, pool, final_state, joint, priorities) and the right orientation. final_state defaults to the block the jigsaw replaces, so it doesn't leave a hole when the structure generates. Reports where the child piece will attach and any problems.",
+	}, handler(s, s.placeJigsaw))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "check_jigsaw_fit",
+		Description: "Check whether a child piece can attach to a parent piece's jigsaws: for each matching jigsaw and rotation, where the child would end up in the parent's coordinates and whether it fits. A child attached by a jigsaw that faces into the parent's bounding box must fit entirely inside that box, or the game silently places nothing.",
+	}, handler(s, s.checkFit))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "assemble_jigsaw",
+		Description: "Assemble a jigsaw structure from a start piece and template pools, following the game's placement rules (attachment, priorities, depth, max distance, and the rule that pieces can't overlap), and open the result as a new structure to inspect with render_layer and describe_structure. Reports every piece placed and every jigsaw that placed nothing, with the reason. Pools come from a datapack folder or inline JSON; element locations can name open structures. Terrain, processors and terrain_matching projection are ignored.",
+	}, handler(s, s.assemble))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "save_structure",
@@ -457,6 +474,7 @@ func summarize(st *structure.Structure) string {
 			fmt.Fprintf(&b, "  %v at %v\n", e.NBT["id"], e.Pos)
 		}
 	}
+	b.WriteString(jigsawReport(st))
 	return b.String()
 }
 
