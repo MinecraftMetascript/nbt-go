@@ -70,3 +70,38 @@ func TestLintClean(t *testing.T) {
 		t.Errorf("clean hut has findings:\n%s", out)
 	}
 }
+
+func TestLintGravityHalvesFire(t *testing.T) {
+	cs := connect(t, t.TempDir())
+	call(t, cs, "create_structure", map[string]any{"name": "s"}, false)
+	call(t, cs, "fill", map[string]any{"name": "s", "from": []int{0, 0, 0}, "to": []int{6, 0, 6}, "block": "stone"}, false)
+	call(t, cs, "set_blocks", map[string]any{"name": "s", "blocks": []map[string]any{
+		// Sand over air falls; gravel on stone and sand on the bottom layer are fine.
+		{"x": 0, "y": 2, "z": 0, "block": "sand"},
+		{"x": 0, "y": 1, "z": 0, "block": "air"},
+		{"x": 1, "y": 1, "z": 0, "block": "gravel"},
+		{"x": 2, "y": 2, "z": 0, "block": "red_concrete_powder"},
+		{"x": 2, "y": 1, "z": 0, "block": "short_grass"},
+		// A door with no top, a whole door, a bed with no head, a whole bed.
+		{"x": 0, "y": 1, "z": 2, "block": "oak_door[facing=south,half=lower,hinge=left]"},
+		{"x": 2, "y": 1, "z": 2, "block": "oak_door[facing=south,half=lower,hinge=left]"},
+		{"x": 2, "y": 2, "z": 2, "block": "oak_door[facing=south,half=upper,hinge=left]"},
+		{"x": 4, "y": 1, "z": 2, "block": "red_bed[facing=east,part=foot]"},
+		{"x": 4, "y": 1, "z": 4, "block": "red_bed[facing=east,part=foot]"},
+		{"x": 5, "y": 1, "z": 4, "block": "red_bed[facing=east,part=head]"},
+		{"x": 6, "y": 2, "z": 0, "block": "sunflower[half=upper]"},
+		// Fire beside planks; lava beside cobblestone is fine.
+		{"x": 0, "y": 1, "z": 6, "block": "fire"},
+		{"x": 1, "y": 1, "z": 6, "block": "oak_planks"},
+		{"x": 4, "y": 1, "z": 6, "block": "lava"},
+		{"x": 5, "y": 1, "z": 6, "block": "mossy_cobblestone"},
+	}}, false)
+	out := call(t, cs, "lint_structure", map[string]any{"name": "s", "checks": []string{"gravity", "halves", "fire"}}, false)
+	wantContains(t, "lint", out,
+		"gravity (2)", "(0, 2, 0) minecraft:sand is above air", "(2, 2, 0) minecraft:red_concrete_powder is above minecraft:short_grass",
+		"halves (3)", "(0, 1, 2) minecraft:oak_door[facing=south,half=lower,hinge=left] needs its upper half at (0, 2, 2), but there is no block",
+		"(4, 1, 2) minecraft:red_bed[facing=east,part=foot] needs its head at (5, 1, 2)",
+		"(6, 2, 0) minecraft:sunflower[half=upper] needs its lower half at (6, 1, 0)",
+		"fire (1)", "(0, 1, 6) minecraft:fire is within reach of 1 flammable block(s), such as minecraft:oak_planks",
+	)
+}

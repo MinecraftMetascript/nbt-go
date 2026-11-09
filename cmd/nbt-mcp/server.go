@@ -217,7 +217,7 @@ func newServer(s *state) *mcp.Server {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "lint_structure",
-		Description: "Check a structure for common mistakes: file format problems, block ids renamed between versions, walls and fences that don't connect, torches, lanterns and vines with nothing to attach to, blocks with nothing below them (legs hanging off a plinth), floating groups, containers with no loot table, high-value blocks players could mine, and jigsaw settings. Run it before saving.",
+		Description: "Check a structure for common mistakes: file format problems, block ids renamed between versions, walls and fences that don't connect, torches, lanterns and vines with nothing to attach to, sand and gravel over air, doors, beds and tall plants missing their other half, fire or lava next to flammable blocks, blocks with nothing below them (legs hanging off a plinth), floating groups, containers with no loot table, high-value blocks players could mine, and jigsaw settings. Run it before saving.",
 	}, handler(s, s.lint))
 
 	mcp.AddTool(srv, &mcp.Tool{
