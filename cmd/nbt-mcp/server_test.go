@@ -61,7 +61,7 @@ func TestListTools(t *testing.T) {
 		"place_jigsaw", "check_jigsaw_fit", "assemble_jigsaw",
 		"fill_ellipsoid", "fill_cylinder", "fill_tube", "decorate_surface", "place_grid", "check_sealed",
 		"transform_structure", "paste_structure", "crop_structure", "set_size",
-		"render_view", "render_image", "lint_structure"}
+		"render_view", "render_image", "lint_structure", "diff_structures"}
 	got := map[string]bool{}
 	for _, tool := range res.Tools {
 		got[tool.Name] = true

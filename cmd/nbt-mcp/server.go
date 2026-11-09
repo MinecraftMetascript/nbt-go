@@ -202,13 +202,18 @@ func newServer(s *state) *mcp.Server {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "describe_structure",
-		Description: "Summarize a structure: size, block counts by type, entities, block entities, and its jigsaw blocks with warnings about likely mistakes.",
+		Description: "Summarize a structure: size, how much is blocks, air and empty space, block counts by type, entities, block entities, and its jigsaw blocks with warnings about likely mistakes.",
 	}, handler(s, s.describe))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "render_layer",
 		Description: "Draw one horizontal layer (a fixed y) as a top-down text grid, one character per block, with a legend. Rows are z (north at the top), columns are x (west on the left). Use it to check your work.",
 	}, handler(s, s.render))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "diff_structures",
+		Description: "Compare two open structures (for example a file loaded before and after edits): size and DataVersion changes, how many positions differ, a count of each kind of change (stone → air), and the individual changes.",
+	}, handler(s, s.diffStructures))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "lint_structure",
@@ -506,6 +511,12 @@ func summarize(st *structure.Structure) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "DataVersion %d, size %d x %d x %d (x, y, z), %d blocks, %d entities.\n",
 		st.DataVersion, st.Size[0], st.Size[1], st.Size[2], len(st.Blocks), len(st.Entities))
+	if vol := int(st.Size[0]) * int(st.Size[1]) * int(st.Size[2]); vol > 0 {
+		solid, air, empty := airStats(st)
+		pct := func(n int) float64 { return 100 * float64(n) / float64(vol) }
+		fmt.Fprintf(&b, "Of %d positions: %d blocks (%.1f%%), %d air (%.1f%%), %d empty, left unchanged when placed (%.1f%%).\n",
+			vol, solid, pct(solid), air, pct(air), empty, pct(empty))
+	}
 	if len(st.Palettes) > 0 {
 		fmt.Fprintf(&b, "Has %d palette variants; counts use the first.\n", len(st.Palettes))
 	}

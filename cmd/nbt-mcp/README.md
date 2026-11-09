@@ -62,7 +62,8 @@ If the client can't find the command, use the full path from `which nbt-mcp`.
 | `set_size`           | Set the size explicitly, to add margin or trim.                                      |
 | `remove_blocks`      | Clear a box back to "no block", so placing the structure leaves the world unchanged there. |
 | `add_entity`         | Add an entity with optional SNBT.                                                    |
-| `describe_structure` | Size, block counts by type, entities, and jigsaw blocks with warnings.               |
+| `describe_structure` | Size, share of blocks, air and empty space, block counts by type, entities, and jigsaw blocks with warnings. |
+| `diff_structures`    | Compare two structures: what changed, grouped by kind, with positions.               |
 | `render_layer`       | A top-down text drawing of one y layer, so the model can check its work.            |
 | `lint_structure`     | Check for common mistakes: format, renamed ids, wall and fence connections, missing support, overhangs, floating parts, empty containers, valuable blocks, jigsaw settings. |
 | `render_view`        | A text projection from the top, bottom or any side: the first block along each line of sight, or its depth. |
