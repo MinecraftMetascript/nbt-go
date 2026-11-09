@@ -45,7 +45,11 @@ Use a symmetric skeleton, then break it: a chimney on one side, a lean-to shed, 
 
 Even a small interior should have a purpose (bed, table, storage, workstation) and lighting. Use partial blocks for furniture: stairs for chairs, a slab or trapdoor on a fence for a table, a barrel or chest for storage, item frames and flower pots on walls. Leave walking paths 1 to 2 blocks wide; don't fill every corner.
 
-## 7. Check and iterate
+## 7. Villages and multi-piece builds
+
+For anything assembled from template pools, read the jigsaw section of this guide: variety there comes from many small variants, slots and jittered connections rather than from one big piece.
+
+## 8. Check and iterate
 
 1. render_image (isometric) for overall shape; render_view south/east/north/west for each elevation.
 2. critique_structure for flat walls, palette, detail ratio, silhouette, overhangs, openings and symmetry. Fix the top findings, then run it again.

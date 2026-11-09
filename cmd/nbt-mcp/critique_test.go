@@ -162,7 +162,50 @@ func TestGuide(t *testing.T) {
 			t.Errorf("prompt is missing %q", want)
 		}
 	}
+	if strings.Contains(txt, "# Jigsaw structures") {
+		t.Error("prompt for a mill includes the jigsaw section")
+	}
+	pr, err = cs.GetPrompt(ctx, &mcp.GetPromptParams{Name: "build", Arguments: map[string]string{"description": "a fishing village"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if txt := pr.Messages[0].Content.(*mcp.TextContent).Text; !strings.Contains(txt, "# Jigsaw structures") || !strings.Contains(txt, "assemble_jigsaw over at least five seeds") {
+		t.Error("prompt for a village is missing the jigsaw section")
+	}
+	if out := call(t, cs, "building_guide", map[string]any{"topics": []string{"jigsaw"}}, false); !strings.Contains(out, "## Jitter") {
+		t.Error("jigsaw topic is missing the jitter section")
+	}
 	if _, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{Name: "build", Arguments: map[string]string{}}); err == nil {
 		t.Error("prompt without a description succeeded")
+	}
+}
+
+// TestJigsawJitter checks the guide's jitter advice against assemble_jigsaw:
+// a child piece with several identical jigsaws lands at different offsets.
+func TestJigsawJitter(t *testing.T) {
+	cs := connect(t, t.TempDir())
+	call(t, cs, "create_structure", map[string]any{"name": "street"}, false)
+	call(t, cs, "fill", map[string]any{"name": "street", "from": []int{0, 0, 0}, "to": []int{8, 0, 2}, "block": "gravel"}, false)
+	call(t, cs, "place_jigsaw", map[string]any{"name": "street", "pos": []int{4, 0, 0}, "facing": "north", "target": "test:house_front", "pool": "test:houses"}, false)
+	call(t, cs, "create_structure", map[string]any{"name": "house"}, false)
+	call(t, cs, "fill", map[string]any{"name": "house", "from": []int{0, 0, 0}, "to": []int{4, 3, 4}, "block": "oak_planks", "mode": "hollow"}, false)
+	for x := 1; x <= 3; x++ {
+		call(t, cs, "place_jigsaw", map[string]any{"name": "house", "pos": []int{x, 0, 4}, "facing": "south", "jigsaw_name": "test:house_front"}, false)
+	}
+	pools := map[string]any{"test:houses": map[string]any{"fallback": "minecraft:empty", "elements": []any{
+		map[string]any{"weight": 1, "element": map[string]any{"element_type": "minecraft:single_pool_element", "location": "house", "projection": "rigid", "processors": "minecraft:empty"}},
+	}}}
+	boxRE := regexp.MustCompile(`#1 minecraft:house, [^\n]*?(x=[^ ]+)`)
+	seen := map[string]bool{}
+	for seed := 1; seed <= 12; seed++ {
+		out := call(t, cs, "assemble_jigsaw", map[string]any{"into": "v", "start": "street", "pools": pools, "seed": seed}, false)
+		m := boxRE.FindStringSubmatch(out)
+		if m == nil {
+			t.Fatalf("seed %d placed no house:\n%s", seed, out)
+		}
+		seen[m[1]] = true
+	}
+	if len(seen) < 2 {
+		t.Errorf("the house always landed at %v; identical jigsaws should jitter it", seen)
 	}
 }
