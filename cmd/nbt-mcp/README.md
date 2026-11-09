@@ -64,6 +64,8 @@ If the client can't find the command, use the full path from `which nbt-mcp`.
 | `add_entity`         | Add an entity with optional SNBT.                                                    |
 | `describe_structure` | Size, block counts by type, entities, and jigsaw blocks with warnings.               |
 | `render_layer`       | A top-down text drawing of one y layer, so the model can check its work.            |
+| `render_view`        | A text projection from the top, bottom or any side: the first block along each line of sight, or its depth. |
+| `render_image`       | A PNG render, isometric or from one side, with an approximate flat color per block.  |
 | `place_jigsaw`       | Place a jigsaw block with typed settings. `final_state` defaults to the block it replaces. |
 | `check_jigsaw_fit`   | Check where a child piece lands on a parent's jigsaws in each rotation, and whether it fits. |
 | `assemble_jigsaw`    | Assemble a whole jigsaw layout from a start piece and template pools, and open the result. |

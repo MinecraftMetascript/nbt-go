@@ -436,3 +436,5 @@ func cloneTag(t nbt.Tag) nbt.Tag {
 	}
 	return t
 }
+
+func mustState(s string) structure.BlockState { return structure.MustParseBlockState(s) }

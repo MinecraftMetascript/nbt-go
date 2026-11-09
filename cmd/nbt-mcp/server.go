@@ -21,7 +21,7 @@ const maxVolume = 1 << 21
 
 const instructions = `Builds Minecraft Java Edition structure files (.nbt).
 
-Workflow: create_structure, then place blocks with fill, set_blocks, place_grid and the shape tools (fill_ellipsoid, fill_cylinder, fill_tube, decorate_surface), check your work with render_layer and describe_structure, and finish with save_structure.
+Workflow: create_structure, then place blocks with fill, set_blocks, place_grid and the shape tools (fill_ellipsoid, fill_cylinder, fill_tube, decorate_surface), check your work with render_layer, render_view, render_image and describe_structure, and finish with save_structure.
 
 Coordinates are relative to the structure's origin and must be non-negative; x is east, y is up, z is south. Blocks use command syntax, such as "stone_bricks" or "oak_stairs[facing=east,half=bottom]"; the minecraft: namespace is optional. Anywhere a block is filled, a weighted mix such as "70%stone_bricks,20%cracked_stone_bricks,10%mossy_stone_bricks" also works; random tools take a seed and report the one they used. Block entity and entity data use SNBT, such as {LootTable:"minecraft:chests/simple_dungeon"}.
 
@@ -209,6 +209,16 @@ func newServer(s *state) *mcp.Server {
 		Name:        "render_layer",
 		Description: "Draw one horizontal layer (a fixed y) as a top-down text grid, one character per block, with a legend. Rows are z (north at the top), columns are x (west on the left). Use it to check your work.",
 	}, handler(s, s.render))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "render_view",
+		Description: "Draw the structure as seen from one side (top, bottom, north, south, east or west) as a text grid with a legend, showing the first non-air block along each line of sight. Use south for a front elevation, east or west for a side elevation, top for a plan. show=depth draws how far in each block is instead.",
+	}, handler(s, s.view))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "render_image",
+		Description: "Render the structure as a PNG image, isometric by default or from one side, with an approximate flat color per block type. Use it to judge overall shape and proportions; use render_view or render_layer for exact positions.",
+	}, s.renderImage)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "place_jigsaw",
