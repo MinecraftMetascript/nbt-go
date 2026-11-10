@@ -31,6 +31,12 @@ func TestPlaceJigsaw(t *testing.T) {
 	}, false)
 	wantContains(t, "place_jigsaw", out, "orientation up_north", "final_state minecraft:stone_bricks (the block it replaced)",
 		"name minecraft:start", "target mypack:top", "joint rollable", "(2, 1, 2)")
+	// A jigsaw it just placed correctly gets no complaints about its own data.
+	for _, bad := range []string{"no block entity data", "orientation property"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("place_jigsaw warned %q about the jigsaw it just placed:\n%s", bad, out)
+		}
+	}
 
 	// A jigsaw in empty space copies the block below it.
 	out = call(t, cs, "place_jigsaw", map[string]any{"name": "floor", "pos": []int{0, 1, 0}, "facing": "east", "target": "a", "pool": "b"}, false)

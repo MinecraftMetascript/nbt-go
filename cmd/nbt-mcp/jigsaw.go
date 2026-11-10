@@ -256,9 +256,13 @@ func (s *state) placeJigsaw(in jigsawIn) (string, error) {
 	}
 
 	bs := structure.BlockState{Name: jigsawBlock, Properties: map[string]string{"orientation": j.orientation()}}
-	if err := st.SetBlock(j.pos[0], j.pos[1], j.pos[2], bs, jigsawNBT(j)); err != nil {
+	data := jigsawNBT(j)
+	if err := st.SetBlock(j.pos[0], j.pos[1], j.pos[2], bs, data); err != nil {
 		return "", err
 	}
+	// Lint the jigsaw as it now reads back from the structure, so the
+	// checks see the block entity data and orientation just written.
+	j = parseJigsaw(j.pos, bs, data)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Placed a jigsaw at %v (orientation %s): name %s, target %s, pool %s, joint %s, final_state %s",
 		j.pos, j.orientation(), j.name, j.target, j.pool, j.joint, j.finalState)

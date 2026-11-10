@@ -25,14 +25,48 @@ func TestHollowShellsAreSealed(t *testing.T) {
 	out = call(t, cs, "check_sealed", map[string]any{"name": "dome", "inside": []int{7, 6, 7}}, false)
 	wantContains(t, "check_sealed", out, "Sealed")
 
-	// Punch a hole and the check finds it.
+	// A slab stops water but is a gap for anything else.
 	call(t, cs, "set_blocks", map[string]any{"name": "dome", "blocks": []map[string]any{{"x": 7, "y": 12, "z": 7, "block": "oak_slab"}}}, false)
 	out = call(t, cs, "check_sealed", map[string]any{"name": "dome", "inside": []int{7, 6, 7}}, false)
-	wantContains(t, "check_sealed", out, "Not sealed", "likely gap is at (7, 12, 7)", "oak_slab")
+	wantContains(t, "check_sealed", out, "Sealed", "Checked against water")
+	out = call(t, cs, "check_sealed", map[string]any{"name": "dome", "inside": []int{7, 6, 7}, "against": "gaps"}, false)
+	wantContains(t, "check_sealed", out, "Not sealed", "likely gap is at (7, 12, 7)", "oak_slab", "Checked for any gap")
+
+	// A torch lets water through, and so does a waterlogged slab.
+	call(t, cs, "set_blocks", map[string]any{"name": "dome", "blocks": []map[string]any{{"x": 7, "y": 12, "z": 7, "block": "oak_slab[waterlogged=true]"}}}, false)
+	out = call(t, cs, "check_sealed", map[string]any{"name": "dome", "inside": []int{7, 6, 7}}, false)
+	wantContains(t, "check_sealed", out, "Not sealed", "likely gap is at (7, 12, 7)")
+	call(t, cs, "set_blocks", map[string]any{"name": "dome", "blocks": []map[string]any{{"x": 7, "y": 12, "z": 7, "block": "torch"}}}, false)
+	out = call(t, cs, "check_sealed", map[string]any{"name": "dome", "inside": []int{7, 6, 7}}, false)
+	wantContains(t, "check_sealed", out, "Not sealed", "minecraft:torch")
+	call(t, cs, "check_sealed", map[string]any{"name": "dome", "inside": []int{7, 6, 7}, "against": "lava"}, true)
 
 	out = call(t, cs, "check_sealed", map[string]any{"name": "dome", "inside": []int{0, 0, 0}}, false)
 	wantContains(t, "check_sealed", out, "Not sealed")
 	call(t, cs, "check_sealed", map[string]any{"name": "dome", "inside": []int{7, 0, 7}}, true) // solid
+}
+
+func TestSealedDoors(t *testing.T) {
+	cs := connect(t, t.TempDir())
+	call(t, cs, "create_structure", map[string]any{"name": "room"}, false)
+	call(t, cs, "fill", map[string]any{"name": "room", "from": []int{0, 0, 0}, "to": []int{4, 4, 4}, "block": "stone", "mode": "hollow"}, false)
+	call(t, cs, "set_blocks", map[string]any{"name": "room", "blocks": []map[string]any{
+		{"x": 2, "y": 1, "z": 0, "block": "oak_door[facing=south,half=lower,open=false]"},
+		{"x": 2, "y": 2, "z": 0, "block": "oak_door[facing=south,half=upper,open=false]"},
+		{"x": 2, "y": 4, "z": 2, "block": "oak_trapdoor[half=top,open=false]"},
+	}}, false)
+	for _, against := range []string{"water", "gaps"} {
+		out := call(t, cs, "check_sealed", map[string]any{"name": "room", "inside": []int{2, 2, 2}, "against": against}, false)
+		wantContains(t, "closed doors, against "+against, out, "Sealed")
+	}
+	// An open door is a gap, but still keeps water out.
+	call(t, cs, "set_blocks", map[string]any{"name": "room", "blocks": []map[string]any{
+		{"x": 2, "y": 1, "z": 0, "block": "oak_door[facing=south,half=lower,open=true]"},
+	}}, false)
+	out := call(t, cs, "check_sealed", map[string]any{"name": "room", "inside": []int{2, 2, 2}, "against": "gaps"}, false)
+	wantContains(t, "open door", out, "Not sealed", "oak_door")
+	out = call(t, cs, "check_sealed", map[string]any{"name": "room", "inside": []int{2, 2, 2}}, false)
+	wantContains(t, "open door, water", out, "Sealed")
 }
 
 func TestCylinders(t *testing.T) {

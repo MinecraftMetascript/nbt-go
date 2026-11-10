@@ -534,8 +534,47 @@ func (s *state) placeGrid(in gridIn) (string, error) {
 }
 
 type sealedIn struct {
-	Name   string `json:"name"`
-	Inside [3]int `json:"inside" jsonschema:"a position [x, y, z] inside the space that should be sealed off"`
+	Name    string `json:"name"`
+	Inside  [3]int `json:"inside" jsonschema:"a position [x, y, z] inside the space that should be sealed off"`
+	Against string `json:"against,omitempty" enum:"water,gaps" jsonschema:"water (default): can water flow in? Only air, water, waterlogged blocks and blocks water washes away (plants, torches, rails, redstone) let it through; slabs, stairs, fences, panes and doors stop it. gaps: is there any opening? Everything that isn't a full block counts as open, except closed doors, trapdoors and fence gates"`
+}
+
+// closedDoorLike reports whether a block is a door, trapdoor or fence gate
+// that is shut.
+func closedDoorLike(bs structure.BlockState) bool {
+	n := bs.Name
+	if !strings.HasSuffix(n, "_door") && !strings.HasSuffix(n, "_trapdoor") && !strings.HasSuffix(n, "_fence_gate") {
+		return false
+	}
+	return bs.Properties["open"] != "true"
+}
+
+// waterPasses reports whether flowing water can enter a block's position:
+// air, water itself, waterlogged blocks (which hold water and pass it on),
+// and blocks water replaces or washes away.
+func waterPasses(bs structure.BlockState) bool {
+	n := strings.TrimPrefix(bs.Name, "minecraft:")
+	if isAir(bs.Name) || bs.Properties["waterlogged"] == "true" || letsBlocksFall(bs) {
+		return true
+	}
+	switch n {
+	case "water", "bubble_column", "kelp", "kelp_plant", "redstone_wire", "tripwire", "cobweb", "sugar_cane",
+		"sweet_berry_bush", "wheat", "carrots", "potatoes", "beetroots", "nether_wart", "torchflower_crop",
+		"pitcher_crop", "cave_vines", "cave_vines_plant", "twisting_vines", "weeping_vines", "hanging_roots":
+		return true
+	}
+	for _, suffix := range []string{"torch", "rail", "_sapling", "_tulip", "_mushroom", "_petals", "_flower"} {
+		if strings.HasSuffix(n, suffix) {
+			return true
+		}
+	}
+	switch n {
+	case "dandelion", "poppy", "blue_orchid", "allium", "azure_bluet", "oxeye_daisy", "cornflower",
+		"lily_of_the_valley", "wither_rose", "torchflower", "sunflower", "lilac", "rose_bush", "peony",
+		"repeater", "comparator", "lever":
+		return true
+	}
+	return false
 }
 
 // checkSealed flood-fills from a position through everything that isn't a
@@ -551,13 +590,25 @@ func (s *state) checkSealed(in sealedIn) (string, error) {
 		return "", fmt.Errorf("%v is outside the structure, %s", start, bounds)
 	}
 	g := newGrid(st)
+	var passes func(structure.BlockState) bool
+	var rule string
+	switch in.Against {
+	case "", "water":
+		passes = waterPasses
+		rule = "Checked against water: positions with no block, air, water, waterlogged blocks, and blocks water washes away (plants, torches, rails, redstone) count as open. Slabs, stairs, fences, panes, doors and other solid blocks stop it."
+	case "gaps":
+		passes = func(bs structure.BlockState) bool { return !isFull(bs) && !closedDoorLike(bs) }
+		rule = "Checked for any gap: positions with no block, air, and blocks that don't fill their cell (slabs, stairs, fences, panes, open doors and so on) count as open. Closed doors, trapdoors and fence gates count as shut."
+	default:
+		return "", fmt.Errorf("against %q must be water or gaps", in.Against)
+	}
 	open := func(p vec) bool {
 		bs, _, ok := g.get(p)
-		return !ok || !isFull(bs)
+		return !ok || passes(bs)
 	}
 	if !open(start) {
 		bs, _, _ := g.get(start)
-		return "", fmt.Errorf("%v is %s, a solid block; give a position in the space to check", start, bs)
+		return "", fmt.Errorf("%v is %s, which blocks the flood fill; give an open position in the space to check", start, bs)
 	}
 	parent := map[vec]vec{start: start}
 	queue := []vec{start}
@@ -571,17 +622,17 @@ func (s *state) checkSealed(in sealedIn) (string, error) {
 			}
 			parent[q] = p
 			if !bounds.contains(q) {
-				return leakReport(g, parent, q, start), nil
+				return leakReport(g, parent, q, start, open) + "\n" + rule, nil
 			}
 			if open(q) {
 				queue = append(queue, q)
 			}
 		}
 	}
-	return fmt.Sprintf("Sealed: the space at %v (%d positions) is closed off on all sides by full blocks.", start, len(parent)), nil
+	return fmt.Sprintf("Sealed: the space at %v (%d positions) is closed off on all sides.\n%s", start, len(parent), rule), nil
 }
 
-func leakReport(g *grid, parent map[vec]vec, out, start vec) string {
+func leakReport(g *grid, parent map[vec]vec, out, start vec, open func(vec) bool) string {
 	var path []vec
 	for p := parent[out]; ; p = parent[p] {
 		path = append(path, p)
@@ -595,7 +646,7 @@ func leakReport(g *grid, parent map[vec]vec, out, start vec) string {
 	solidAround := func(p vec) int {
 		n := 0
 		for _, d := range dirVecs {
-			if bs, _, ok := g.get(p.add(d)); ok && isFull(bs) {
+			if !open(p.add(d)) {
 				n++
 			}
 		}
@@ -621,6 +672,6 @@ func leakReport(g *grid, parent map[vec]vec, out, start vec) string {
 	if bs, _, ok := g.get(gap); ok {
 		what = bs.String()
 	}
-	return fmt.Sprintf("Not sealed: the space at %v reaches the outside of the structure in %d steps, leaving at %v.\nThe likely gap is at %v, which holds %s with %d of 6 neighbours solid.\nPositions with no block, air, and blocks that don't fill their cell (slabs, stairs, fences, panes, doors and so on) count as open.",
+	return fmt.Sprintf("Not sealed: the space at %v reaches the outside of the structure in %d steps, leaving at %v.\nThe likely gap is at %v, which holds %s with %d of 6 neighbours closed.",
 		start, len(path), path[0], gap, what, best)
 }
