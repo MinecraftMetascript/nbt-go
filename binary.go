@@ -277,9 +277,34 @@ func (r *reader) list() (Tag, error) {
 		if err != nil {
 			return nil, err
 		}
+		if et == TagCompound {
+			v = unwrap(v.(Compound))
+		}
 		l = append(l, v)
 	}
 	return l, nil
+}
+
+// wrap and unwrap are how a list that mixes types is stored, as
+// Minecraft stores one: as a list of compounds, with each element that is
+// not a compound (or that looks like a wrapper) inside one under the key "".
+func wrap(t Tag) Tag {
+	if c, ok := t.(Compound); ok && !isWrapper(c) {
+		return c
+	}
+	return Compound{"": t}
+}
+
+func unwrap(c Compound) Tag {
+	if isWrapper(c) {
+		return c[""]
+	}
+	return c
+}
+
+func isWrapper(c Compound) bool {
+	v, ok := c[""]
+	return ok && v != nil && len(c) == 1
 }
 
 func (r *reader) compound() (Tag, error) {
@@ -409,18 +434,19 @@ func (w *writer) payload(t Tag) error {
 		if err := checkLen(len(v)); err != nil {
 			return err
 		}
-		et := v.ElemType()
 		for i, e := range v {
 			if e == nil {
 				return fmt.Errorf("nbt: nil element at list index %d", i)
 			}
-			if e.Type() != et {
-				return fmt.Errorf("nbt: list mixes %v and %v at index %d", et, e.Type(), i)
-			}
 		}
+		et := v.ElemType()
 		w.u8(byte(et))
 		w.u32(uint32(len(v)))
+		mixed := v.Mixed()
 		for _, e := range v {
+			if mixed {
+				e = wrap(e)
+			}
 			if err := w.payload(e); err != nil {
 				return err
 			}

@@ -56,7 +56,8 @@ func TestSNBTParse(t *testing.T) {
 		{"[I;]", IntArray{}},
 		{"[L;1L,2]", LongArray{1, 2}},
 		{" { a : 1 , 'b c':{x:[{}]} } ", Compound{"a": Int(1), "b c": Compound{"x": List{Compound{}}}}},
-		{"[1,2b]", nil},
+		{"[1,2b]", List{Int(1), Byte(2)}},
+		{`["",{text:"a"}]`, List{String(""), Compound{"text": String("a")}}},
 		{"{a:1", nil},
 		{"{a:1}}", nil},
 		{`"unterminated`, nil},
@@ -115,5 +116,75 @@ func TestUnmarshalSNBT(t *testing.T) {
 	}
 	if s != `{Items:[{Slot:0b,count:3,id:"minecraft:diamond"},{Slot:1b,count:64,id:"minecraft:torch"}]}` {
 		t.Errorf("MarshalSNBT = %s", s)
+	}
+}
+
+// Strings are quoted the way Minecraft writes them: the quote is the other
+// kind from the first quote character in the string, and control
+// characters are escaped so the result is one line.
+func TestQuote(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                 `""`,
+		"plain":            `"plain"`,
+		`say "hi"`:         `'say "hi"'`,
+		"it's":             `"it's"`,
+		`"a" 'b'`:          `'"a" \'b\''`,
+		`'a' "b"`:          `"'a' \"b\""`,
+		`back\slash`:       `"back\\slash"`,
+		"line\nbreak\ttab": `"line\nbreak\ttab"`,
+		"\b\f\r\x01\x1f":   `"\b\f\r\x01\x1F"`,
+		"é\x7f":            "\"é\x7f\"",
+	} {
+		if got := Quote(in); got != want {
+			t.Errorf("Quote(%q) = %s, want %s", in, got, want)
+		}
+		if back, err := ParseSNBT(Quote(in)); err != nil || back != String(in) {
+			t.Errorf("ParseSNBT(Quote(%q)) = %#v, %v", in, back, err)
+		}
+	}
+}
+
+// Compound keys are bare only when Minecraft would leave them bare.
+func TestSNBTKeys(t *testing.T) {
+	c := Compound{"a": Int(1), "_b.c+d-e": Int(2), "1": Int(3), "-x": Int(4), "+y": Int(5), "a:b": Int(6), "": Int(7)}
+	want := `{"":7,"+y":5,"-x":4,"1":3,_b.c+d-e:2,a:1,"a:b":6}`
+	if got := c.String(); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+	for k, want := range map[string]string{"a": "a", "_b.c+d-e": "_b.c+d-e", "1": `"1"`, "a:b": `"a:b"`, "": `""`, `say "x"`: `'say "x"'`} {
+		if got := QuoteKey(k); got != want {
+			t.Errorf("QuoteKey(%q) = %s, want %s", k, got, want)
+		}
+	}
+	back, err := ParseSNBT(want)
+	if err != nil || !Equal(back, c) {
+		t.Errorf("round trip: %v %v", back, err)
+	}
+}
+
+// A list that mixes types is stored the way Minecraft stores one: as a
+// list of compounds, wrapping each element that is not one.
+func TestMixedList(t *testing.T) {
+	l := List{String("a"), Compound{"text": String("b")}, Int(3), Compound{"": Int(4)}}
+	if !l.Mixed() || l.ElemType() != TagCompound {
+		t.Fatalf("Mixed() = %v, ElemType() = %v", l.Mixed(), l.ElemType())
+	}
+	data, err := Marshal(Compound{"l": l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tree Tag
+	if err := Unmarshal(data, &tree); err != nil {
+		t.Fatal(err)
+	}
+	if got := tree.(Compound)["l"]; !Equal(got, l) {
+		t.Errorf("round trip: %v, want %v", got, l)
+	}
+	// A list of one type is written as that type.
+	if (List{Int(1), Int(2)}).Mixed() || (List{}).Mixed() {
+		t.Error("a plain list is not mixed")
+	}
+	if !(List{Compound{"": Int(1)}}).Mixed() {
+		t.Error("a list holding a wrapper-shaped compound must be wrapped")
 	}
 }
