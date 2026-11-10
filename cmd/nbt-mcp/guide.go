@@ -92,9 +92,9 @@ func addGuide(srv *mcp.Server, s *state) {
 	for i, t := range guideTopics {
 		topics[i] = t.name + " (" + t.about + ")"
 	}
-	addTool(srv, kindRead, "building_guide", "Building guide",
+	addTool(srv, s, kindRead, "building_guide", "Building guide",
 		"Read the building guide before designing a structure, so it looks hand-crafted rather than generated. Topics: "+strings.Join(topics, "; ")+". Pass style=survival or style=creative to get the principles plus that style and its palettes.",
-		handler(s, s.guide))
+		handler(s.guide))
 
 	srv.AddPrompt(&mcp.Prompt{
 		Name:        "build",

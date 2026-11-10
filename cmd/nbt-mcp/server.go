@@ -23,7 +23,7 @@ const instructions = `Builds Minecraft Java Edition structure files (.nbt).
 
 Before designing a build, read building_guide (with style=survival for practical builds a player could make, or style=creative for showpieces): it covers what makes a build look hand-crafted rather than generated, and palettes by theme. The build prompt walks through a whole build.
 
-Workflow: create_structure, then place blocks with fill, set_blocks, place_grid and the shape tools (fill_ellipsoid, fill_cylinder, fill_tube, decorate_surface), check your work with render_layer, render_view, render_image, describe_structure, critique_structure and lint_structure, and finish with save_structure.
+Workflow: create_structure, then place blocks with fill, set_blocks, place_grid and the shape tools (fill_ellipsoid, fill_cylinder, fill_tube, decorate_surface), check your work with render_layer, render_view, render_image, describe_structure, critique_structure and lint_structure, and finish with save_structure. Every edit can be taken back with undo (and redo), so try a change and back out of it if it made the build worse.
 
 Coordinates are relative to the structure's origin and must be non-negative; x is east, y is up, z is south. Blocks use command syntax, such as "stone_bricks" or "oak_stairs[facing=east,half=bottom]"; the minecraft: namespace is optional. Anywhere a block is filled, a weighted mix such as "70%stone_bricks,20%cracked_stone_bricks,10%mossy_stone_bricks" also works; random tools take a seed and report the one they used. Block entity and entity data use SNBT, such as {LootTable:"minecraft:chests/simple_dungeon"}.
 
@@ -37,6 +37,11 @@ type state struct {
 	restrict    bool // only read and write files inside dir
 	dataVersion int32
 	structures  map[string]*structure.Structure
+
+	// undo and redo hold what edits replaced, newest last.
+	undo, redo []edit
+	// changed, if set, is told which structures an edit touched.
+	changed func(names []string)
 }
 
 func newState(dir string, dataVersion int32) *state {
@@ -126,17 +131,26 @@ func text(format string, args ...any) *mcp.CallToolResult {
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf(format, args...)}}}
 }
 
-// handler adapts a function returning text to an MCP tool handler, holding
-// the state lock for the duration of the call.
-func handler[In any](s *state, f func(In) (string, error)) mcp.ToolHandlerFor[In, any] {
+// handler adapts a function returning text to an MCP tool handler.
+func handler[In any](f func(In) (string, error)) mcp.ToolHandlerFor[In, any] {
 	return func(_ context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
 		out, err := f(in)
 		if err != nil {
 			return nil, nil, err
 		}
 		return text("%s", out), nil, nil
+	}
+}
+
+// handlerOut adapts a function that returns text for the model and the same
+// result as data, which clients get as structured content.
+func handlerOut[In, Out any](f func(In) (string, Out, error)) mcp.ToolHandlerFor[In, Out] {
+	return func(_ context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
+		txt, out, err := f(in)
+		if err != nil {
+			return nil, out, err
+		}
+		return text("%s", txt), out, nil
 	}
 }
 
@@ -159,119 +173,127 @@ func newServer(s *state) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "nbt-mcp", Title: "Minecraft structure builder", Version: version()},
 		&mcp.ServerOptions{Instructions: instructions})
 
-	addTool(srv, kindEdit, "create_structure", "Create structure",
+	addTool(srv, s, kindEdit, "create_structure", "Create structure",
 		"Start a new, empty structure in memory. Replaces any open structure with the same name.",
-		handler(s, s.create))
+		handler(s.create))
 
-	addTool(srv, kindEdit, "load_structure", "Load structure file",
+	addTool(srv, s, kindEdit, "load_structure", "Load structure file",
 		"Open an existing .nbt structure file for viewing or editing.",
-		handler(s, s.load))
+		handler(s.load))
 
-	addTool(srv, kindRead, "list_structures", "List open structures",
+	addTool(srv, s, kindRead, "list_structures", "List open structures",
 		"List the structures currently open in memory.",
-		handler(s, s.list))
+		handler(s.list))
 
-	addTool(srv, kindEdit, "set_blocks", "Set blocks",
+	addTool(srv, s, kindEdit, "set_blocks", "Set blocks",
 		"Place individual blocks, replacing whatever is at each position. Use this for details such as doors, stairs, chests and torches.",
-		handler(s, s.setBlocks))
+		handler(s.setBlocks))
 
-	addTool(srv, kindEdit, "fill", "Fill box",
+	addTool(srv, s, kindEdit, "fill", "Fill box",
 		"Fill a box with one block or a weighted mix, like the /fill command. Corners are inclusive. Mode \"replace\" fills the whole box, \"hollow\" fills the shell and puts air inside, and \"outline\" fills only the shell and leaves the inside unchanged.",
-		handler(s, s.fill))
+		handler(s.fill))
 
-	addTool(srv, kindEdit, "fill_ellipsoid", "Fill sphere or ellipsoid",
+	addTool(srv, s, kindEdit, "fill_ellipsoid", "Fill sphere or ellipsoid",
 		"Fill a sphere or ellipsoid, solid or as a watertight hollow shell. Good for domes, boulders, bushes, caves and organic bodies.",
-		handler(s, s.ellipsoid))
+		handler(s.ellipsoid))
 
-	addTool(srv, kindEdit, "fill_cylinder", "Fill cylinder",
+	addTool(srv, s, kindEdit, "fill_cylinder", "Fill cylinder",
 		"Fill a cylinder along x, y or z: solid, a hollow shell, a tube or ring (hollow with open_ends), or a disc (height 1). Cross-sections can be elliptical.",
-		handler(s, s.cylinder))
+		handler(s.cylinder))
 
-	addTool(srv, kindEdit, "fill_tube", "Fill tube along a path",
+	addTool(srv, s, kindEdit, "fill_tube", "Fill tube along a path",
 		"Fill a rounded tube along a path of points, optionally tapering from one radius to another. Good for trunks, branches, roots, tentacles, pipes and curved tunnels.",
-		handler(s, s.tube))
+		handler(s.tube))
 
-	addTool(srv, kindEdit, "decorate_surface", "Decorate surfaces",
+	addTool(srv, s, kindEdit, "decorate_surface", "Decorate surfaces",
 		"Apply a block to the exposed faces of solid blocks, like a decal: moss or snow on top surfaces, vines or glow lichen on walls, grass on the top of a mound. Can be limited to a box, to certain blocks, and to a random fraction of positions.",
-		handler(s, s.decorate))
+		handler(s.decorate))
 
-	addTool(srv, kindEdit, "place_grid", "Place blocks from a text grid",
+	addTool(srv, s, kindEdit, "place_grid", "Place blocks from a text grid",
 		"Place many blocks at once from text layers and a legend, in the same layout render_layer draws: each layer is a list of rows from north to south, each character one block going east. Much more compact than set_blocks for detailed builds.",
-		handler(s, s.placeGrid))
+		handler(s.placeGrid))
 
-	addTool(srv, kindRead, "check_sealed", "Check a space is sealed",
+	addTool(srv, s, kindRead, "check_sealed", "Check a space is sealed",
 		"Check that a space is watertight: flood-fill from a position through everything that isn't a full block and report whether it reaches the outside, and where the likely gap is.",
-		handler(s, s.checkSealed))
+		handler(s.checkSealed))
 
-	addTool(srv, kindEdit, "transform_structure", "Rotate or mirror structure",
+	addTool(srv, s, kindEdit, "transform_structure", "Rotate or mirror structure",
 		"Rotate and/or mirror a whole structure in place, turning block states (facing, axis, connections, rails, stairs) and entities to match.",
-		handler(s, s.transformStructure))
+		handler(s.transformStructure))
 
-	addTool(srv, kindEdit, "paste_structure", "Paste structure",
+	addTool(srv, s, kindEdit, "paste_structure", "Paste structure",
 		"Copy one open structure into another at a position, optionally rotated or mirrored. Use it to merge parts built separately or repeat a module.",
-		handler(s, s.pasteStructure))
+		handler(s.pasteStructure))
 
-	addTool(srv, kindEdit, "crop_structure", "Crop structure",
+	addTool(srv, s, kindEdit, "crop_structure", "Crop structure",
 		"Cut a structure down to a box (inclusive corners), moving that box to the origin. Optionally keep the original and open the cropped copy under a new name.",
-		handler(s, s.crop))
+		handler(s.crop))
 
-	addTool(srv, kindEdit, "set_size", "Set structure size",
+	addTool(srv, s, kindEdit, "set_size", "Set structure size",
 		"Set a structure's size explicitly, to add empty margin or trim it. Shrinking refuses to cut off blocks unless drop is set.",
-		handler(s, s.setSize))
+		handler(s.setSize))
 
-	addTool(srv, kindEdit, "remove_blocks", "Remove blocks",
+	addTool(srv, s, kindEdit, "remove_blocks", "Remove blocks",
 		"Remove blocks from a box (inclusive corners), so those positions are left unchanged when the structure is placed. This is not the same as placing air.",
-		handler(s, s.remove))
+		handler(s.remove))
 
-	addTool(srv, kindEdit, "add_entity", "Add entity",
+	addTool(srv, s, kindEdit, "add_entity", "Add entity",
 		"Add an entity, such as an armor stand, villager or item frame.",
-		handler(s, s.addEntity))
+		handler(s.addEntity))
 
-	addTool(srv, kindRead, "describe_structure", "Describe structure",
+	addTool(srv, s, kindRead, "describe_structure", "Describe structure",
 		"Summarize a structure: size, how much is blocks, air and empty space, block counts by type, entities, block entities, and its jigsaw blocks with warnings about likely mistakes.",
-		handler(s, s.describe))
+		handlerOut(s.describe))
 
-	addTool(srv, kindRead, "render_layer", "Render layer as text",
+	addTool(srv, s, kindRead, "render_layer", "Render layer as text",
 		"Draw one horizontal layer (a fixed y) as a top-down text grid, one character per block, with a legend. Rows are z (north at the top), columns are x (west on the left). Use it to check your work.",
-		handler(s, s.render))
+		handler(s.render))
 
-	addTool(srv, kindRead, "diff_structures", "Compare structures",
+	addTool(srv, s, kindRead, "diff_structures", "Compare structures",
 		"Compare two open structures (for example a file loaded before and after edits): size and DataVersion changes, how many positions differ, a count of each kind of change (stone → air), and the individual changes.",
-		handler(s, s.diffStructures))
+		handlerOut(s.diffStructures))
 
-	addTool(srv, kindRead, "lint_structure", "Lint structure",
+	addTool(srv, s, kindRead, "lint_structure", "Lint structure",
 		"Check a structure for common mistakes: file format problems, block ids renamed between versions, walls and fences that don't connect, torches, lanterns and vines with nothing to attach to, sand and gravel over air, doors, beds and tall plants missing their other half, fire or lava next to flammable blocks, blocks with nothing below them (legs hanging off a plinth), floating groups, containers with no loot table, high-value blocks players could mine, and jigsaw settings. Run it before saving.",
-		handler(s, s.lint))
+		handlerOut(s.lint))
 
-	addTool(srv, kindRead, "render_view", "Render view as text",
+	addTool(srv, s, kindRead, "render_view", "Render view as text",
 		"Draw the structure as seen from one side (top, bottom, north, south, east or west) as a text grid with a legend, showing the first non-air block along each line of sight. Use south for a front elevation, east or west for a side elevation, top for a plan. show=depth draws how far in each block is instead.",
-		handler(s, s.view))
+		handler(s.view))
 
-	addTool(srv, kindRead, "render_image", "Render images",
+	addTool(srv, s, kindRead, "render_image", "Render images",
 		"Look at the structure: render PNG images from one or more viewpoints in a single call, so you can see it the way a player would. Views: isometric from each corner (iso_se, iso_sw, iso_nw, iso_ne), plan (top), elevations (south, north, east, west), or presets (corners, elevations, overview, all). Use cutaway_y to see inside a floor, and from/to to cut a cross-section. Partial blocks get their rough shape and glass and water are see-through; colors are approximate. Use render_view or render_layer for exact positions.",
 		s.renderImage)
 
-	addTool(srv, kindEdit, "place_jigsaw", "Place jigsaw block",
+	addTool(srv, s, kindEdit, "place_jigsaw", "Place jigsaw block",
 		"Place a jigsaw block with its settings (name, target, pool, final_state, joint, priorities) and the right orientation. final_state defaults to the block the jigsaw replaces, so it doesn't leave a hole when the structure generates. Reports where the child piece will attach and any problems.",
-		handler(s, s.placeJigsaw))
+		handler(s.placeJigsaw))
 
-	addTool(srv, kindRead, "check_jigsaw_fit", "Check jigsaw fit",
+	addTool(srv, s, kindRead, "check_jigsaw_fit", "Check jigsaw fit",
 		"Check whether a child piece can attach to a parent piece's jigsaws: for each matching jigsaw and rotation, where the child would end up in the parent's coordinates and whether it fits. A child attached by a jigsaw that faces into the parent's bounding box must fit entirely inside that box, or the game silently places nothing.",
-		handler(s, s.checkFit))
+		handler(s.checkFit))
 
-	addTool(srv, kindEdit, "assemble_jigsaw", "Assemble jigsaw structure",
+	addTool(srv, s, kindEdit, "assemble_jigsaw", "Assemble jigsaw structure",
 		"Assemble a jigsaw structure from a start piece and template pools, following the game's placement rules (attachment, priorities, depth, max distance, and the rule that pieces can't overlap), and open the result as a new structure to inspect with render_layer and describe_structure. Reports every piece placed and every jigsaw that placed nothing, with the reason. Pools come from a datapack folder or inline JSON; element locations can name open structures. Terrain, processors and terrain_matching projection are ignored.",
-		handler(s, s.assemble))
+		handler(s.assemble))
 
-	addTool(srv, kindRead, "critique_structure", "Critique structure",
+	addTool(srv, s, kindRead, "critique_structure", "Critique structure",
 		"Score how hand-crafted a build looks, in survival or creative style, and list the most valuable fixes with coordinates: flat walls (depth), palette variety, share of detail blocks, silhouette, roof overhangs, foundation and colour gradient, windows and doors, asymmetry, and for survival style, lavish materials. Run it after blocking out and again after detailing; lint_structure checks correctness instead.",
-		handler(s, s.critique))
+		handlerOut(s.critique))
+
+	addTool(srv, s, kindHistory, "undo", "Undo edits",
+		"Undo the most recent edits, one tool call per step: a fill, a paste, a crop, creating or loading a structure, and so on. Files already saved are not changed. Use it to back out of a change that made the build worse instead of repairing it by hand.",
+		handlerOut(s.undoEdits))
+
+	addTool(srv, s, kindHistory, "redo", "Redo edits",
+		"Redo edits that undo took back. A new edit after an undo clears what could be redone.",
+		handlerOut(s.redoEdits))
 
 	addGuide(srv, s)
 
-	addTool(srv, kindWrite, "save_structure", "Save structure file",
+	addTool(srv, s, kindWrite, "save_structure", "Save structure file",
 		"Write a structure to a gzip-compressed .nbt file. To use it in a world, save to <world>/generated/<namespace>/structure/<name>.nbt (\"structures\" before 1.21) and load it with a structure block or /place template <namespace>:<name>.",
-		handler(s, s.save))
+		handler(s.save))
 
 	return srv
 }
@@ -316,7 +338,8 @@ func (s *state) load(in loadIn) (string, error) {
 		return "", fmt.Errorf("reading %s: %w", path, err)
 	}
 	s.structures[in.Name] = st
-	return fmt.Sprintf("Loaded %s as %q.\n\n%s", path, in.Name, summarize(st)), nil
+	txt, _ := summarize(st)
+	return fmt.Sprintf("Loaded %s as %q.\n\n%s", path, in.Name, txt), nil
 }
 
 type listIn struct{}
@@ -522,25 +545,30 @@ type nameIn struct {
 	Name string `json:"name"`
 }
 
-func (s *state) describe(in nameIn) (string, error) {
+func (s *state) describe(in nameIn) (string, describeOut, error) {
 	st, err := s.get(in.Name)
 	if err != nil {
-		return "", err
+		return "", describeOut{}, err
 	}
-	return summarize(st), nil
+	txt, out := summarize(st)
+	return txt, out, nil
 }
 
-func summarize(st *structure.Structure) string {
+// summarize describes a structure as text and as data.
+func summarize(st *structure.Structure) (string, describeOut) {
+	out := describeOut{DataVersion: st.DataVersion, GameVersion: versionName(st.DataVersion), Size: size3(st.Size)}
 	var b strings.Builder
 	fmt.Fprintf(&b, "DataVersion %s, size %d x %d x %d (x, y, z), %d blocks, %d entities.\n",
 		dataVersionLabel(st.DataVersion), st.Size[0], st.Size[1], st.Size[2], len(st.Blocks), len(st.Entities))
 	if vol := int(st.Size[0]) * int(st.Size[1]) * int(st.Size[2]); vol > 0 {
 		solid, air, empty := airStats(st)
+		out.Positions, out.Blocks, out.Air, out.Empty = vol, solid, air, empty
 		pct := func(n int) float64 { return 100 * float64(n) / float64(vol) }
 		fmt.Fprintf(&b, "Of %d positions: %d blocks (%.1f%%), %d air (%.1f%%), %d empty, left unchanged when placed (%.1f%%).\n",
 			vol, solid, pct(solid), air, pct(air), empty, pct(empty))
 	}
 	if len(st.Palettes) > 0 {
+		out.PaletteCount = len(st.Palettes)
 		fmt.Fprintf(&b, "Has %d palette variants; counts use the first.\n", len(st.Palettes))
 	}
 	palette := st.Palette
@@ -548,13 +576,12 @@ func summarize(st *structure.Structure) string {
 		palette = st.Palettes[0]
 	}
 	counts := make([]int, len(palette))
-	withNBT := 0
 	for _, bl := range st.Blocks {
 		if int(bl.State) < len(counts) {
 			counts[bl.State]++
 		}
 		if len(bl.NBT) > 0 {
-			withNBT++
+			out.BlockEntities++
 		}
 	}
 	order := make([]int, 0, len(palette))
@@ -567,20 +594,25 @@ func summarize(st *structure.Structure) string {
 	if len(order) > 0 {
 		b.WriteString("\nBlocks:\n")
 		for _, i := range order {
+			out.BlockCounts = append(out.BlockCounts, blockCount{Block: palette[i].String(), Count: counts[i]})
 			fmt.Fprintf(&b, "  %6d  %s\n", counts[i], palette[i])
 		}
 	}
-	if withNBT > 0 {
-		fmt.Fprintf(&b, "\n%d blocks have block entity data.\n", withNBT)
+	if out.BlockEntities > 0 {
+		fmt.Fprintf(&b, "\n%d blocks have block entity data.\n", out.BlockEntities)
 	}
 	if len(st.Entities) > 0 {
 		b.WriteString("\nEntities:\n")
 		for _, e := range st.Entities {
+			id, _ := e.NBT["id"].(nbt.String)
+			out.Entities = append(out.Entities, entityOut{ID: string(id), Pos: e.Pos})
 			fmt.Fprintf(&b, "  %v at %v\n", e.NBT["id"], e.Pos)
 		}
 	}
-	b.WriteString(jigsawReport(st))
-	return b.String()
+	jigsaws, js, warnings := jigsawReport(st)
+	out.Jigsaws, out.Warnings = js, warnings
+	b.WriteString(jigsaws)
+	return b.String(), out
 }
 
 type renderIn struct {

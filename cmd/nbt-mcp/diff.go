@@ -15,14 +15,14 @@ type diffIn struct {
 }
 
 // diffStructures compares two structures position by position.
-func (s *state) diffStructures(in diffIn) (string, error) {
+func (s *state) diffStructures(in diffIn) (string, diffOut, error) {
 	a, err := s.get(in.Before)
 	if err != nil {
-		return "", err
+		return "", diffOut{}, err
 	}
 	b, err := s.get(in.After)
 	if err != nil {
-		return "", err
+		return "", diffOut{}, err
 	}
 	limit := in.Limit
 	if limit <= 0 {
@@ -63,6 +63,12 @@ func (s *state) diffStructures(in diffIn) (string, error) {
 	}
 	sort.Slice(changes, func(i, j int) bool { return lessVec(changes[i].p, changes[j].p) })
 
+	res := diffOut{
+		SizeBefore: size3(a.Size), SizeAfter: size3(b.Size),
+		DataVersionBefore: a.DataVersion, DataVersionAfter: b.DataVersion,
+		EntitiesBefore: len(a.Entities), EntitiesAfter: len(b.Entities),
+		Differ: len(changes),
+	}
 	var out strings.Builder
 	fmt.Fprintf(&out, "Comparing %q (before) with %q (after).\n", in.Before, in.After)
 	if a.Size != b.Size {
@@ -76,7 +82,7 @@ func (s *state) diffStructures(in diffIn) (string, error) {
 	}
 	if len(changes) == 0 {
 		out.WriteString("No blocks differ.\n")
-		return out.String(), nil
+		return out.String(), res, nil
 	}
 	bounds := box{changes[0].p, changes[0].p}
 	kinds := map[string]int{}
@@ -90,6 +96,8 @@ func (s *state) diffStructures(in diffIn) (string, error) {
 			kinds[nameOnly(c.from)+" → "+nameOnly(c.to)]++
 		}
 	}
+	region := bounds.out()
+	res.Bounds = &region
 	fmt.Fprintf(&out, "%d positions differ, within %s.\n\nBy kind:\n", len(changes), bounds)
 	keys := make([]string, 0, len(kinds))
 	for k := range kinds {
@@ -106,6 +114,7 @@ func (s *state) diffStructures(in diffIn) (string, error) {
 			fmt.Fprintf(&out, "  ... and %d more kinds\n", len(keys)-limit)
 			break
 		}
+		res.Kinds = append(res.Kinds, diffKind{Kind: k, Count: kinds[k]})
 		fmt.Fprintf(&out, "  %6d  %s\n", kinds[k], k)
 	}
 	out.WriteString("\nChanges:\n")
@@ -114,9 +123,10 @@ func (s *state) diffStructures(in diffIn) (string, error) {
 			fmt.Fprintf(&out, "  ... and %d more\n", len(changes)-limit)
 			break
 		}
+		res.Changes = append(res.Changes, diffChange{Pos: c.p, Before: c.from, After: c.to})
 		fmt.Fprintf(&out, "  %v %s → %s\n", c.p, c.from, c.to)
 	}
-	return out.String(), nil
+	return out.String(), res, nil
 }
 
 // nameOnly drops block state properties, to group changes by block type.

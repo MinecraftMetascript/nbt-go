@@ -70,7 +70,7 @@ func TestListTools(t *testing.T) {
 		"fill_ellipsoid", "fill_cylinder", "fill_tube", "decorate_surface", "place_grid", "check_sealed",
 		"transform_structure", "paste_structure", "crop_structure", "set_size",
 		"render_view", "render_image", "lint_structure", "diff_structures",
-		"critique_structure", "building_guide"}
+		"critique_structure", "building_guide", "undo", "redo"}
 	got := map[string]bool{}
 	for _, tool := range res.Tools {
 		got[tool.Name] = true
@@ -230,6 +230,9 @@ func TestToolSchemas(t *testing.T) {
 			t.Fatalf("%s: input schema is %v", tool.Name, tool.InputSchema)
 		}
 		check(tool.Name, schema)
+		if out, ok := tool.OutputSchema.(map[string]any); ok {
+			check(tool.Name+" output", out)
+		}
 		props, _ := schema["properties"].(map[string]any)
 		for name, p := range props {
 			if d, _ := p.(map[string]any)["description"].(string); d == "" {

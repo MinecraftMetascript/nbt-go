@@ -338,17 +338,23 @@ func lintJigsaw(st *structure.Structure, g *grid, j jigsaw) []string {
 }
 
 // jigsawReport lists a structure's jigsaws with their settings and lints.
-func jigsawReport(st *structure.Structure) string {
+func jigsawReport(st *structure.Structure) (string, []jigsawOut, []string) {
 	js := jigsawsOf(st)
 	if len(js) == 0 {
-		return ""
+		return "", nil, nil
 	}
 	g := newGrid(st)
 	bounds := sizeBox(st.Size)
 	var b strings.Builder
+	var out []jigsawOut
+	var warnings []string
 	fmt.Fprintf(&b, "\nJigsaws (%d):\n", len(js))
 	targets := map[vec][]vec{}
 	for _, j := range js {
+		o := jigsawOut{
+			Pos: j.pos, Orientation: j.orientation(), Name: j.name, Target: j.target, Pool: j.pool,
+			Joint: j.joint, FinalState: j.finalState, PlacementPriority: j.placement, SelectionPriority: j.selection,
+		}
 		fmt.Fprintf(&b, "  %v %s: name %s, target %s, pool %s, joint %s, final_state %s",
 			j.pos, j.orientation(), j.name, j.target, j.pool, j.joint, j.finalState)
 		if j.placement != 0 || j.selection != 0 {
@@ -356,21 +362,32 @@ func jigsawReport(st *structure.Structure) string {
 		}
 		b.WriteByte('\n')
 		if j.pool != emptyID && bounds.contains(j.targetPos()) {
+			o.ConnectsInside = true
 			fmt.Fprintf(&b, "    connects inside this piece (child jigsaw at %v): the whole child must fit inside this piece's bounds, %s\n", j.targetPos(), bounds)
 		}
 		for _, l := range lintJigsaw(st, g, j) {
+			o.Warnings = append(o.Warnings, l)
 			fmt.Fprintf(&b, "    warning: %s\n", l)
 		}
 		if j.pool != emptyID {
 			targets[j.targetPos()] = append(targets[j.targetPos()], j.pos)
 		}
+		out = append(out, o)
 	}
-	for t, from := range targets {
-		if len(from) > 1 {
-			fmt.Fprintf(&b, "  warning: jigsaws at %v all face %v, so their children would collide\n", from, t)
+	// In position order, so the report doesn't change from run to run.
+	faced := make([]vec, 0, len(targets))
+	for t := range targets {
+		faced = append(faced, t)
+	}
+	sort.Slice(faced, func(i, k int) bool { return lessVec(faced[i], faced[k]) })
+	for _, t := range faced {
+		if from := targets[t]; len(from) > 1 {
+			w := fmt.Sprintf("jigsaws at %v all face %v, so their children would collide", from, t)
+			warnings = append(warnings, w)
+			fmt.Fprintf(&b, "  warning: %s\n", w)
 		}
 	}
-	return b.String()
+	return b.String(), out, warnings
 }
 
 type fitIn struct {
