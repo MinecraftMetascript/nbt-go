@@ -322,7 +322,7 @@ func (l *linter) connections() {
 			}
 			has := v == "true" || v == "low" || v == "tall"
 			q := p.add(d.vec())
-			nb, _, exists := l.g.get(q)
+			nb, exists := l.placed(q)
 			switch {
 			case !exists && has:
 				wrong = append(wrong, fmt.Sprintf("%s=%s but there's no block to the %s (it depends on the world)", d, v, d))
@@ -435,7 +435,7 @@ func (l *linter) support() {
 	l.blocks(func(p vec, bs structure.BlockState, _ nbt.Compound) {
 		for _, d := range supportsNeeded(bs) {
 			q := p.add(d.vec())
-			nb, _, ok := l.g.get(q)
+			nb, ok := l.placed(q)
 			switch {
 			case !ok && q[1] < 0:
 				// Resting on whatever is below the structure is normal.
@@ -453,10 +453,27 @@ func (l *linter) support() {
 	})
 }
 
+// placed returns the block that ends up at p in the world: a jigsaw is
+// replaced by its final_state when the structure is placed.
+func (l *linter) placed(p vec) (structure.BlockState, bool) {
+	bs, data, ok := l.g.get(p)
+	if ok && bs.Name == jigsawBlock {
+		if fs, err := structure.ParseBlockState(parseJigsaw(p, bs, data).finalState); err == nil {
+			return fs, true
+		}
+	}
+	return bs, ok
+}
+
 // sturdyEnough allows a few common non-full supports.
 func sturdyEnough(bs, nb structure.BlockState) bool {
 	n := nb.Name
 	switch {
+	case strings.HasSuffix(bs.Name, "_pressure_plate"):
+		// Pressure plates only need the middle of the top face, which
+		// fences and walls have.
+		return strings.Contains(n, "fence") || strings.HasSuffix(n, "_wall") || strings.Contains(n, "slab") && nb.Properties["type"] != "bottom" ||
+			strings.Contains(n, "stairs") && nb.Properties["half"] == "top"
 	case strings.HasSuffix(bs.Name, "lantern") || strings.HasSuffix(bs.Name, "chain"):
 		return strings.Contains(n, "chain") || strings.Contains(n, "fence") || strings.HasSuffix(n, "_wall") || strings.Contains(n, "slab") || strings.Contains(n, "stairs") || strings.Contains(n, "lantern")
 	case strings.HasSuffix(bs.Name, "_carpet") || strings.HasPrefix(bs.Name, "minecraft:potted_") || bs.Name == "minecraft:flower_pot" || strings.HasSuffix(bs.Name, "candle"):
@@ -741,7 +758,7 @@ func (l *linter) gravity() {
 			return
 		}
 		q := p.add(down.vec())
-		nb, _, ok := l.g.get(q)
+		nb, ok := l.placed(q)
 		switch {
 		case !ok:
 			// Unchanged world positions are only a problem if nothing below

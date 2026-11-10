@@ -144,3 +144,29 @@ func TestAddedBlocksAreUnique(t *testing.T) {
 		}
 	}
 }
+
+func TestLintSupportJigsawAndFence(t *testing.T) {
+	cs := connect(t, t.TempDir())
+	call(t, cs, "create_structure", map[string]any{"name": "s"}, false)
+	call(t, cs, "fill", map[string]any{"name": "s", "from": []int{0, 0, 0}, "to": []int{3, 0, 0}, "block": "stone_bricks"}, false)
+	// A rail and a door stand on jigsaws that become stone bricks.
+	call(t, cs, "place_jigsaw", map[string]any{"name": "s", "pos": []int{0, 0, 0}, "facing": "north", "target": "a", "pool": "b", "final_state": "stone_bricks"}, false)
+	call(t, cs, "place_jigsaw", map[string]any{"name": "s", "pos": []int{1, 0, 0}, "facing": "north", "target": "a", "pool": "b", "final_state": "stone_bricks"}, false)
+	// This one becomes air, so the rail on it really has nothing under it.
+	call(t, cs, "place_jigsaw", map[string]any{"name": "s", "pos": []int{3, 0, 0}, "facing": "north", "target": "a", "pool": "b", "final_state": "air"}, false)
+	call(t, cs, "set_blocks", map[string]any{"name": "s", "blocks": []map[string]any{
+		{"x": 0, "y": 1, "z": 0, "block": "rail"},
+		{"x": 1, "y": 1, "z": 0, "block": "oak_door[facing=north,half=lower]"},
+		{"x": 1, "y": 2, "z": 0, "block": "oak_door[facing=north,half=upper]"},
+		{"x": 2, "y": 1, "z": 0, "block": "oak_fence"},
+		{"x": 2, "y": 2, "z": 0, "block": "oak_pressure_plate"},
+		{"x": 3, "y": 1, "z": 0, "block": "rail"},
+	}}, false)
+	out := call(t, cs, "lint_structure", map[string]any{"name": "s", "checks": []string{"support"}}, false)
+	wantContains(t, "lint_structure", out, "support (1)", "(3, 1, 0) minecraft:rail")
+	for _, bad := range []string{"(0, 1, 0)", "(1, 1, 0)", "pressure_plate"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("support lint flagged %s:\n%s", bad, out)
+		}
+	}
+}
