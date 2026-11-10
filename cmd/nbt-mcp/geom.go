@@ -333,7 +333,7 @@ var nonFullHints = []string{
 	"petals", "sculk_vein", "sculk_sensor", "sculk_shrieker", "conduit", "glow_lichen",
 	"structure_void", "barrier", "jigsaw", "dirt_path", "farmland", "soul_sand", "honey_block",
 	"cactus", "bamboo", "sugar_cane", "wheat", "carrots", "beetroots", "melon_stem", "pumpkin_stem",
-	"sweet_berry", "cocoa", "nether_wart", "hanging_roots", "heavy_core",
+	"sweet_berry", "shrub", "sulfur_spike", "cocoa", "nether_wart", "hanging_roots", "heavy_core",
 }
 
 // fullBlockOverrides are blocks whose names contain a non-full hint but fill

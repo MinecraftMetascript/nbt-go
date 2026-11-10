@@ -264,7 +264,7 @@ func newServer(s *state) *mcp.Server {
 
 type createIn struct {
 	Name        string `json:"name" jsonschema:"name to refer to the structure by in other tools"`
-	DataVersion int32  `json:"data_version,omitempty" jsonschema:"DataVersion of the target Minecraft version, e.g. 4189 for 1.21.4; defaults to the server's setting"`
+	DataVersion int32  `json:"data_version,omitempty" jsonschema:"DataVersion of the target Minecraft version, e.g. 4189 for 1.21.4 or 5023 for 26.3; defaults to the server's setting"`
 }
 
 func (s *state) create(in createIn) (string, error) {
@@ -276,7 +276,7 @@ func (s *state) create(in createIn) (string, error) {
 		v = s.dataVersion
 	}
 	s.structures[in.Name] = structure.New(v)
-	return fmt.Sprintf("Created empty structure %q (DataVersion %d).", in.Name, v), nil
+	return fmt.Sprintf("Created empty structure %q (DataVersion %s).", in.Name, dataVersionLabel(v)), nil
 }
 
 type loadIn struct {
@@ -518,8 +518,8 @@ func (s *state) describe(in nameIn) (string, error) {
 
 func summarize(st *structure.Structure) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "DataVersion %d, size %d x %d x %d (x, y, z), %d blocks, %d entities.\n",
-		st.DataVersion, st.Size[0], st.Size[1], st.Size[2], len(st.Blocks), len(st.Entities))
+	fmt.Fprintf(&b, "DataVersion %s, size %d x %d x %d (x, y, z), %d blocks, %d entities.\n",
+		dataVersionLabel(st.DataVersion), st.Size[0], st.Size[1], st.Size[2], len(st.Blocks), len(st.Entities))
 	if vol := int(st.Size[0]) * int(st.Size[1]) * int(st.Size[2]); vol > 0 {
 		solid, air, empty := airStats(st)
 		pct := func(n int) float64 { return 100 * float64(n) / float64(vol) }

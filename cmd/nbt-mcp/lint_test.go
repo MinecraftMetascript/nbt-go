@@ -7,7 +7,8 @@ import (
 
 func TestLint(t *testing.T) {
 	cs := connect(t, t.TempDir())
-	call(t, cs, "create_structure", map[string]any{"name": "s"}, false)
+	// 1.21.4, so that iron_chain (1.21.9) is flagged as renamed.
+	call(t, cs, "create_structure", map[string]any{"name": "s", "data_version": 4189}, false)
 	call(t, cs, "fill", map[string]any{"name": "s", "from": []int{0, 0, 0}, "to": []int{4, 0, 4}, "block": "stone"}, false)
 	call(t, cs, "set_blocks", map[string]any{"name": "s", "blocks": []map[string]any{
 		{"x": 0, "y": 1, "z": 0, "block": "cobblestone_wall[east=tall,north=none,south=none,west=none,up=true]"},
@@ -104,4 +105,42 @@ func TestLintGravityHalvesFire(t *testing.T) {
 		"(6, 2, 0) minecraft:sunflower[half=upper] needs its lower half at (6, 1, 0)",
 		"fire (1)", "(0, 1, 6) minecraft:fire is within reach of 1 flammable block(s), such as minecraft:oak_planks",
 	)
+}
+
+func TestLintNewerBlocks(t *testing.T) {
+	cs := connect(t, t.TempDir())
+	call(t, cs, "create_structure", map[string]any{"name": "old", "data_version": 4189}, false)
+	call(t, cs, "fill", map[string]any{"name": "old", "from": []int{0, 0, 0}, "to": []int{2, 0, 0}, "block": "poplar_planks"}, false)
+	call(t, cs, "set_blocks", map[string]any{"name": "old", "blocks": []map[string]any{
+		{"x": 0, "y": 1, "z": 0, "block": "sulfur_bricks"},
+		{"x": 1, "y": 1, "z": 0, "block": "stone"},
+	}}, false)
+	out := call(t, cs, "lint_structure", map[string]any{"name": "old", "checks": []string{"newer"}}, false)
+	wantContains(t, "lint newer", out,
+		"newer (2)",
+		"3 × minecraft:poplar_planks: added in 26.3 (DataVersion 5023), but the file says DataVersion 4189 (1.21.4)",
+		"1 × minecraft:sulfur_bricks: added in 26.2 (DataVersion 4903)",
+	)
+
+	call(t, cs, "create_structure", map[string]any{"name": "new", "data_version": 5023}, false)
+	call(t, cs, "fill", map[string]any{"name": "new", "from": []int{0, 0, 0}, "to": []int{2, 0, 0}, "block": "poplar_planks"}, false)
+	out = call(t, cs, "lint_structure", map[string]any{"name": "new", "checks": []string{"newer"}}, false)
+	if strings.Contains(out, "poplar_planks") {
+		t.Errorf("poplar_planks is fine at DataVersion 5023:\n%s", out)
+	}
+}
+
+func TestAddedBlocksAreUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for _, a := range addedBlocks {
+		if i := indexOfVersion(a.version); i < 0 || knownVersions[i].dataVersion != a.dataVersion {
+			t.Errorf("%s/%d isn't in knownVersions", a.version, a.dataVersion)
+		}
+		for _, id := range a.ids {
+			if seen[id] {
+				t.Errorf("%s listed twice", id)
+			}
+			seen[id] = true
+		}
+	}
 }

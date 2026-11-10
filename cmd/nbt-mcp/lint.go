@@ -14,6 +14,7 @@ import (
 var lintChecks = []struct{ name, about string }{
 	{"format", "the file's structure: palette, block positions, entities"},
 	{"renamed", "block ids that were renamed between game versions"},
+	{"newer", "blocks added in a game version newer than the file's DataVersion"},
 	{"connections", "walls, fences, panes and bars whose connections don't match their neighbours"},
 	{"support", "torches, lanterns, vines, signs, buttons and other blocks with nothing to attach to"},
 	{"gravity", "sand, gravel, concrete powder and other falling blocks with nothing under them"},
@@ -28,7 +29,7 @@ var lintChecks = []struct{ name, about string }{
 
 type lintIn struct {
 	Name   string   `json:"name"`
-	Checks []string `json:"checks,omitempty" jsonschema:"which checks to run (default all): format, renamed, connections, support, gravity, halves, fire, unsupported, floating, containers, valuables, jigsaw"`
+	Checks []string `json:"checks,omitempty" jsonschema:"which checks to run (default all): format, renamed, newer, connections, support, gravity, halves, fire, unsupported, floating, containers, valuables, jigsaw"`
 	Limit  int      `json:"limit,omitempty" jsonschema:"most findings to list per check (default 10)"`
 }
 
@@ -87,7 +88,7 @@ func (s *state) lint(in lintIn) (string, error) {
 	}
 	l := &linter{st: st, g: newGrid(st), out: map[string][]finding{}}
 	checks := map[string]func(){
-		"format": l.format, "renamed": l.renamed, "connections": l.connections, "support": l.support,
+		"format": l.format, "renamed": l.renamed, "newer": l.newer, "connections": l.connections, "support": l.support,
 		"gravity": l.gravity, "halves": l.halves, "fire": l.fire,
 		"unsupported": l.unsupported, "floating": l.floating, "containers": l.containers,
 		"valuables": l.valuables, "jigsaw": l.jigsaw,
@@ -235,6 +236,33 @@ func (l *linter) renamed() {
 	}
 }
 
+// newer flags blocks that the game version the file claims to be for doesn't
+// have yet. Newer games load them fine, so this only matters when the file is
+// meant for that older version.
+func (l *linter) newer() {
+	dv := l.st.DataVersion
+	counts := map[string]int{}
+	first := map[string]vec{}
+	l.blocks(func(p vec, bs structure.BlockState, _ nbt.Compound) {
+		if v, ok := addedIn[bs.Name]; ok && dv < v.dataVersion {
+			if _, ok := first[bs.Name]; !ok {
+				first[bs.Name] = p
+			}
+			counts[bs.Name]++
+		}
+	})
+	names := make([]string, 0, len(counts))
+	for n := range counts {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		v := addedIn[n]
+		l.add("newer", first[n], "%d × %s: added in %s (DataVersion %d), but the file says DataVersion %s. %s and later load it; for older games pick another block, or raise the DataVersion if you only target %s+",
+			counts[n], n, v.name, v.dataVersion, dataVersionLabel(dv), v.name, v.name)
+	}
+}
+
 // connectFamily groups blocks with north/east/south/west connections.
 func connectFamily(name string) string {
 	switch {
@@ -371,7 +399,7 @@ func supportsNeeded(bs structure.BlockState) []dir {
 			}
 		}
 		return nil
-	case name == "pointed_dripstone":
+	case name == "pointed_dripstone", name == "sulfur_spike":
 		if props["vertical_direction"] == "down" {
 			return []dir{up}
 		}
@@ -384,8 +412,8 @@ func supportsNeeded(bs structure.BlockState) []dir {
 		name == "repeater", name == "comparator", strings.HasSuffix(name, "candle"), name == "flower_pot",
 		strings.HasPrefix(name, "potted_"), name == "short_grass", name == "tall_grass", name == "fern",
 		name == "large_fern", name == "dead_bush", strings.HasSuffix(name, "_sapling"), name == "sea_pickle",
-		name == "snow", strings.HasSuffix(name, "_mushroom"), strings.HasSuffix(name, "_tulip"),
-		strings.HasSuffix(name, "_coral"), name == "dandelion", name == "poppy", name == "blue_orchid",
+		name == "snow", strings.HasSuffix(name, "_mushroom") && name != "shelf_mushroom", strings.HasSuffix(name, "_tulip"),
+		strings.HasSuffix(name, "_coral"), name == "dandelion", name == "golden_dandelion", name == "red_shrub", name == "poppy", name == "blue_orchid",
 		name == "allium", name == "azure_bluet", name == "oxeye_daisy", name == "cornflower",
 		name == "lily_of_the_valley", name == "wither_rose", name == "torchflower", name == "sunflower",
 		name == "lilac", name == "rose_bush", name == "peony", strings.HasSuffix(name, "_petals"),
@@ -764,7 +792,7 @@ func (l *linter) halves() {
 }
 
 // woodTypes are the overworld woods; crimson and warped wood don't burn.
-var woodTypes = []string{"oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "mangrove", "cherry", "bamboo", "pale_oak", "azalea"}
+var woodTypes = []string{"oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "mangrove", "cherry", "bamboo", "pale_oak", "poplar", "azalea"}
 
 // isFlammable guesses whether fire can burn or spread to a block.
 func isFlammable(name string) bool {
@@ -779,7 +807,7 @@ func isFlammable(name string) bool {
 	}
 	for _, f := range []string{"_wool", "_carpet", "leaves", "bookshelf", "hay_block", "tnt", "scaffolding",
 		"vine", "short_grass", "tall_grass", "fern", "dried_kelp_block", "target", "beehive", "bee_nest",
-		"lectern", "composter", "coal_block", "moss_block", "moss_carpet", "pale_moss", "_banner", "dead_bush", "sweet_berry_bush",
+		"lectern", "composter", "coal_block", "moss_block", "moss_carpet", "pale_moss", "_banner", "dead_bush", "sweet_berry_bush", "red_shrub",
 		"dandelion", "poppy", "orchid", "allium", "bluet", "tulip", "daisy", "cornflower", "lily_of_the_valley",
 		"sunflower", "lilac", "rose_bush", "peony", "torchflower", "_petals", "spore_blossom", "hanging_roots",
 		"cave_vines", "big_dripleaf", "small_dripleaf", "glow_lichen", "_bed"} {
