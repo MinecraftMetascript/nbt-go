@@ -144,7 +144,7 @@ Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `str
 | --- | --- |
 | `place_jigsaw` | Place a jigsaw block with typed settings. `final_state` defaults to the block it replaces. |
 | `check_jigsaw_fit` | Check where a child piece lands on a parent's jigsaws in each rotation, and whether it fits. |
-| `assemble_jigsaw` | Assemble a whole jigsaw layout from a start piece and template pools, and open the result. |
+| `assemble_jigsaw` | Assemble a whole jigsaw layout from a start piece and template pools, and open the result. Large layouts get a summary; `seeds` reports which templates never get placed. |
 
 Blocks use command syntax (`oak_stairs[facing=east,half=bottom]`), and the `minecraft:` namespace is optional. Wherever a tool fills an area, the block can also be a weighted mix such as `70%stone_bricks,20%cracked_stone_bricks,10%mossy_stone_bricks` (`3*stone,1*andesite` works too). Every random tool takes a `seed` and reports the seed it used, so a result can be reproduced.
 

@@ -205,3 +205,38 @@ func TestJigsawAssembleDatapack(t *testing.T) {
 	out := call(t, cs, "assemble_jigsaw", map[string]any{"into": "layout", "start_pool": "test:start", "datapack": "pack", "seed": 3}, false)
 	wantContains(t, "assemble_jigsaw", out, "Assembled 2 pieces", "#0 test:plinth", "#1 test:monuments/statue")
 }
+
+// TestJigsawAssembleSummary builds a chain whose halls connect both ways, so
+// every hall's entry jigsaw points back at its parent.
+func TestJigsawAssembleSummary(t *testing.T) {
+	cs := connect(t, t.TempDir())
+	hallway(t, cs)
+	call(t, cs, "place_jigsaw", map[string]any{"name": "hall", "pos": []int{0, 1, 1}, "facing": "west", "jigsaw_name": "test:hall", "target": "test:hall", "pool": "test:halls", "final_state": "air"}, false)
+	call(t, cs, "create_structure", map[string]any{"name": "odd"}, false)
+	call(t, cs, "place_jigsaw", map[string]any{"name": "odd", "pos": []int{0, 0, 0}, "facing": "up", "jigsaw_name": "test:other"}, false)
+	pools := map[string]any{
+		"test:halls": map[string]any{"fallback": "test:ends", "elements": []any{
+			map[string]any{"weight": 1, "element": map[string]any{"element_type": "minecraft:single_pool_element", "location": "hall", "projection": "rigid"}},
+			map[string]any{"weight": 1, "element": map[string]any{"element_type": "minecraft:single_pool_element", "location": "odd", "projection": "rigid"}},
+		}},
+		"test:ends": map[string]any{"elements": []any{}},
+	}
+	out := call(t, cs, "assemble_jigsaw", map[string]any{"into": "layout", "start": "room", "pools": pools, "max_depth": 5, "seed": 1, "detail": "summary"}, false)
+	wantContains(t, "assemble_jigsaw", out, "Assembled 6 pieces", "Pieces per template (2 templates):", "5  minecraft:hall (depth 1-5)",
+		"1  room (depth 0)", "Pieces per depth: 0:1 1:1 2:1 3:1 4:1 5:1",
+		"Problems (1, grouped by pool and reason):", "1x pool test:halls, target test:hall: nothing placed, max_depth reached",
+		"5 pieces' entry jigsaws")
+	if strings.Contains(out, "#3 minecraft:hall") {
+		t.Errorf("summary should not list pieces:\n%s", out)
+	}
+	full := call(t, cs, "assemble_jigsaw", map[string]any{"into": "layout", "start": "room", "pools": pools, "max_depth": 5, "seed": 1}, false)
+	wantContains(t, "assemble_jigsaw", full, "#3 minecraft:hall", "5 pieces' entry jigsaws")
+	if n := strings.Count(full, "nothing placed"); n != 1 {
+		t.Errorf("entry jigsaws should not be listed as problems, got %d:\n%s", n, full)
+	}
+
+	cov := call(t, cs, "assemble_jigsaw", map[string]any{"into": "layout", "start": "room", "pools": pools, "max_depth": 2, "seed": 1, "seeds": 4}, false)
+	wantContains(t, "assemble_jigsaw", cov, "Coverage over 4 seeds (1 to 4): 3 to 3 pieces per layout", "4/4  minecraft:hall (8 placed)",
+		"Never placed in 4 seeds:\n  minecraft:odd (offered by test:halls)")
+	call(t, cs, "assemble_jigsaw", map[string]any{"into": "layout", "start": "room", "pools": pools, "seeds": 65}, true)
+}

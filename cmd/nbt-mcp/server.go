@@ -277,7 +277,7 @@ func newServer(s *state) *mcp.Server {
 		handler(s.checkFit))
 
 	addTool(srv, s, kindEdit, "assemble_jigsaw", "Assemble jigsaw structure",
-		"Assemble a jigsaw structure from a start piece and template pools, following the game's placement rules (attachment, priorities, depth, max distance, and the rule that pieces can't overlap), and open the result as a new structure to inspect with render_layer and describe_structure. Reports every piece placed and every jigsaw that placed nothing, with the reason. Pools come from a datapack folder or inline JSON; element locations can name open structures. Terrain, processors and terrain_matching projection are ignored.",
+		"Assemble a jigsaw structure from a start piece and template pools, following the game's placement rules (attachment, priorities, depth, max distance, and the rule that pieces can't overlap), and open the result as a new structure to inspect with render_layer and describe_structure. Reports every piece placed and every jigsaw that placed nothing, with the reason; above 40 pieces it gives a summary instead (counts per template, a depth histogram, problems grouped by reason). Entry jigsaws that point back at their parent are counted, not listed. Pass seeds to try several layouts and see which templates never get placed. Pools come from a datapack folder or inline JSON; element locations can name open structures. Terrain, processors and terrain_matching projection are ignored.",
 		handler(s.assemble))
 
 	addTool(srv, s, kindRead, "critique_structure", "Critique structure",

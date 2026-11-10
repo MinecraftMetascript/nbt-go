@@ -29,6 +29,8 @@ type assembleIn struct {
 	StartRotation string         `json:"start_rotation,omitempty" enum:"none,clockwise_90,180,counterclockwise_90,random" jsonschema:"rotation of the start piece: none (default), clockwise_90, 180, counterclockwise_90 or random"`
 	Seed          *int64         `json:"seed,omitempty" jsonschema:"random seed; the same seed and inputs give the same layout. A random one is used and reported if omitted"`
 	KeepJigsaws   bool           `json:"keep_jigsaws,omitempty" jsonschema:"leave jigsaw blocks in the result instead of replacing them with their final_state"`
+	Detail        string         `json:"detail,omitempty" enum:"auto,full,summary" jsonschema:"full lists every piece and problem; summary gives counts per template, a depth histogram and problems grouped by reason. auto (default) is full up to 40 pieces and summary above that"`
+	Seeds         int            `json:"seeds,omitempty" jsonschema:"assemble this many layouts, with seeds seed, seed+1, ..., and report how often each template was placed and which were never placed (default 1, at most 64). The first layout is the one opened"`
 }
 
 type poolElement struct {
@@ -60,6 +62,7 @@ type piece struct {
 	free   *space // the space this piece was placed into
 	parent int    // index of the parent piece, -1 for the start
 	via    vec    // the parent's jigsaw that placed it
+	entry  vec    // this piece's own jigsaw that attached it to the parent
 }
 
 // space is the room left for new pieces: a container box minus the boxes of
@@ -112,14 +115,24 @@ func (s *state) assemble(in assembleIn) (string, error) {
 	if in.MaxDistance < 1 || in.MaxDistance > 128 {
 		return "", fmt.Errorf("max_distance must be between 1 and 128, got %d", in.MaxDistance)
 	}
+	if in.Seeds == 0 {
+		in.Seeds = 1
+	}
+	if in.Seeds < 1 || in.Seeds > 64 {
+		return "", fmt.Errorf("seeds must be between 1 and 64, got %d", in.Seeds)
+	}
+	switch in.Detail {
+	case "", "auto", "full", "summary":
+	default:
+		return "", fmt.Errorf("detail must be auto, full or summary, got %q", in.Detail)
+	}
 	seed := time.Now().UnixNano()
 	if in.Seed != nil {
 		seed = *in.Seed
 	}
-	a := &assembler{
-		s: s, in: in, rng: rand.New(rand.NewSource(seed)),
+	shared := &assembler{
+		s: s, in: in,
 		inline: map[string]templatePool{}, pools: map[string]*templatePool{}, tpls: map[string]*template{},
-		notes: map[string]bool{},
 	}
 	if in.Datapack != "" {
 		dp, err := s.resolve(in.Datapack)
@@ -129,35 +142,71 @@ func (s *state) assemble(in assembleIn) (string, error) {
 		if fi, err := os.Stat(filepath.Join(dp, "data")); err != nil || !fi.IsDir() {
 			return "", fmt.Errorf("%s has no data folder; datapack should be the pack's root folder", dp)
 		}
-		a.datapack = dp
+		shared.datapack = dp
 	}
 	for id, raw := range in.Pools {
 		p, err := parsePool(namespaced(id), raw)
 		if err != nil {
 			return "", fmt.Errorf("pools[%q]: %w", id, err)
 		}
-		a.inline[p.id] = *p
+		shared.inline[p.id] = *p
 	}
 
+	var first *assembler
+	var runs []*assembler
+	for k := 0; k < in.Seeds; k++ {
+		a := shared.fresh(seed + int64(k))
+		if err := a.build(); err != nil {
+			return "", err
+		}
+		runs = append(runs, a)
+		if k == 0 {
+			first = a
+		}
+	}
+	out, err := first.merge()
+	if err != nil {
+		return "", err
+	}
+	s.structures[in.Into] = out
+	rep := first.report(seed, out)
+	if in.Seeds > 1 {
+		rep += coverage(shared, runs, seed)
+	}
+	return rep, nil
+}
+
+// fresh starts an assembly with its own random source and pieces, sharing
+// the pool and template caches of a.
+func (a *assembler) fresh(seed int64) *assembler {
+	return &assembler{
+		s: a.s, in: a.in, rng: rand.New(rand.NewSource(seed)), datapack: a.datapack,
+		inline: a.inline, pools: a.pools, tpls: a.tpls, notes: map[string]bool{},
+	}
+}
+
+// build picks the start piece and assembles the layout.
+func (a *assembler) build() error {
+	in := a.in
 	var startTpl *template
 	if in.Start != "" {
 		t, err := a.template(in.Start)
 		if err != nil {
-			return "", fmt.Errorf("start: %w", err)
+			return fmt.Errorf("start: %w", err)
 		}
 		startTpl = t
 	} else {
 		p, err := a.pool(namespaced(in.StartPool))
 		if err != nil {
-			return "", fmt.Errorf("start_pool: %w", err)
+			return fmt.Errorf("start_pool: %w", err)
 		}
 		el, ok := a.pickWeighted(p.elements)
 		if !ok {
-			return "", fmt.Errorf("start_pool %s has no single_pool_element entries", p.id)
+			return fmt.Errorf("start_pool %s has no single_pool_element entries", p.id)
 		}
 		t, err := a.template(el.location)
 		if err != nil {
-			return "", fmt.Errorf("start_pool %s: %w", p.id, err)
+			return fmt.Errorf("start_pool %s: %w", p.id, err)
 		}
 		startTpl = t
 	}
@@ -167,7 +216,7 @@ func (s *state) assemble(in assembleIn) (string, error) {
 	} else {
 		r, err := parseRotation(in.StartRotation)
 		if err != nil {
-			return "", err
+			return err
 		}
 		rot = r
 	}
@@ -180,13 +229,7 @@ func (s *state) assemble(in assembleIn) (string, error) {
 	global.usedBy = append(global.usedBy, 0)
 	a.pieces = append(a.pieces, piece{tpl: startTpl, rot: rot, box: startBox, free: global, parent: -1})
 	a.run()
-
-	out, err := a.merge()
-	if err != nil {
-		return "", err
-	}
-	s.structures[in.Into] = out
-	return a.report(seed, out), nil
+	return nil
 }
 
 // run expands pieces in the game's order: a queue ordered by the placement
@@ -226,6 +269,11 @@ type issue struct {
 	piece  int
 	jigsaw *jigsaw
 	msg    string
+	// entry marks a failure of the jigsaw that attached the piece to its
+	// parent. It points back into the parent, so it can only fail; with
+	// symmetric connectors (each jigsaw both names and targets the joint)
+	// every piece has one.
+	entry bool
 }
 
 // expand tries to attach children to every jigsaw of piece i, like the
@@ -249,6 +297,11 @@ func (a *assembler) expand(i int) []placed {
 		}
 		fail := func(format string, args ...any) {
 			a.issues = append(a.issues, issue{piece: i, jigsaw: &j, msg: fmt.Sprintf(format, args...)})
+		}
+		isEntry := p.parent >= 0 && j.pos == p.entry
+		failPlacing := func(format string, args ...any) {
+			fail(format, args...)
+			a.issues[len(a.issues)-1].entry = isEntry
 		}
 		pool, err := a.pool(j.pool)
 		if err != nil {
@@ -328,7 +381,7 @@ func (a *assembler) expand(i int) []placed {
 					idx := len(a.pieces)
 					free.used = append(free.used, cb)
 					free.usedBy = append(free.usedBy, idx)
-					a.pieces = append(a.pieces, piece{tpl: tpl, rot: r, offset: off, box: cb, depth: p.depth + 1, free: free, parent: i, via: j.pos})
+					a.pieces = append(a.pieces, piece{tpl: tpl, rot: r, offset: off, box: cb, depth: p.depth + 1, free: free, parent: i, via: j.pos, entry: target})
 					children = append(children, placed{idx, j.placement})
 					done = true
 					break
@@ -347,12 +400,12 @@ func (a *assembler) expand(i int) []placed {
 		switch {
 		case len(candidates) == 0:
 			if p.depth == a.in.MaxDepth {
-				fail("nothing placed, max_depth reached, so only the fallback pool %s was tried and it has nothing to place", pool.fallback)
+				failPlacing("nothing placed, max_depth reached, so only the fallback pool %s was tried and it has nothing to place", pool.fallback)
 			} else {
-				fail("nothing placed, the pool is empty")
+				failPlacing("nothing placed, the pool is empty")
 			}
 		case tried > 0 && attachable == 0:
-			fail("nothing placed, no piece in the pool has a jigsaw named %s that can face %s", j.target, j.front.opposite())
+			failPlacing("nothing placed, no piece in the pool has a jigsaw named %s that can face %s", j.target, j.front.opposite())
 		case attachable > 0:
 			msg := "nothing placed; every option was blocked:"
 			for k, f := range failures {
@@ -362,7 +415,7 @@ func (a *assembler) expand(i int) []placed {
 				}
 				msg += "\n      " + f
 			}
-			fail("%s", msg)
+			failPlacing("%s", msg)
 		}
 	}
 	return children
@@ -586,28 +639,46 @@ func (a *assembler) merge() (*structure.Structure, error) {
 	return out, nil
 }
 
+// fullDetailLimit is the most pieces detail=auto lists one by one.
+const fullDetailLimit = 40
+
 func (a *assembler) report(seed int64, out *structure.Structure) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Assembled %d pieces into %q (size %d x %d x %d), seed %d.\n", len(a.pieces), a.in.Into, out.Size[0], out.Size[1], out.Size[2], seed)
-	fmt.Fprintf(&b, "Coordinates below are in the assembled structure; the start piece's origin is at %v.\n\nPieces:\n", a.shift)
-	for i, p := range a.pieces {
-		bx := p.box.moved(a.shift)
-		fmt.Fprintf(&b, "  #%d %s, rotation %s, depth %d, %s", i, p.tpl.location, p.rot, p.depth, bx)
-		if p.parent >= 0 {
-			fmt.Fprintf(&b, ", attached to #%d by the jigsaw at %v", p.parent, p.via.add(a.shift))
-		}
-		b.WriteByte('\n')
+	fmt.Fprintf(&b, "Coordinates below are in the assembled structure; the start piece's origin is at %v.\n", a.shift)
+	full := a.in.Detail == "full" || ((a.in.Detail == "" || a.in.Detail == "auto") && len(a.pieces) <= fullDetailLimit)
+	if !full && a.in.Detail != "summary" {
+		fmt.Fprintf(&b, "This is a summary because there are more than %d pieces; pass detail=full for every piece and problem.\n", fullDetailLimit)
 	}
-	if len(a.issues) > 0 {
-		b.WriteString("\nProblems:\n")
-		for _, is := range a.issues {
-			b.WriteString("  ")
-			if j := is.jigsaw; j != nil {
-				fmt.Fprintf(&b, "piece #%d (%s) jigsaw at %v facing %s, pool %s, target %s: ",
-					is.piece, a.pieces[is.piece].tpl.location, j.pos.add(a.shift), j.front, j.pool, j.target)
-			}
-			b.WriteString(is.msg + "\n")
+	var problems, entries []issue
+	for _, is := range a.issues {
+		if is.entry {
+			entries = append(entries, is)
+		} else {
+			problems = append(problems, is)
 		}
+	}
+	if full {
+		b.WriteString("\nPieces:\n")
+		for i, p := range a.pieces {
+			bx := p.box.moved(a.shift)
+			fmt.Fprintf(&b, "  #%d %s, rotation %s, depth %d, %s", i, p.tpl.location, p.rot, p.depth, bx)
+			if p.parent >= 0 {
+				fmt.Fprintf(&b, ", attached to #%d by the jigsaw at %v", p.parent, p.via.add(a.shift))
+			}
+			b.WriteByte('\n')
+		}
+		if len(problems) > 0 {
+			b.WriteString("\nProblems:\n")
+			for _, is := range problems {
+				b.WriteString("  " + a.where(is) + is.msg + "\n")
+			}
+		}
+	} else {
+		a.summary(&b, problems)
+	}
+	if len(entries) > 0 {
+		fmt.Fprintf(&b, "\n%d pieces' entry jigsaws (the one that attached the piece to its parent) placed nothing. That is expected: they point back into the parent, as they do whenever connectors are symmetric, so they aren't listed as problems.\n", len(entries))
 	}
 	if len(a.notes) > 0 {
 		b.WriteString("\nNotes:\n")
@@ -621,5 +692,170 @@ func (a *assembler) report(seed int64, out *structure.Structure) string {
 		}
 	}
 	b.WriteString("\nThis follows the game's jigsaw rules for rigid pieces but ignores terrain, processors and other structures.\n")
+	return b.String()
+}
+
+// where describes the piece and jigsaw an issue is about.
+func (a *assembler) where(is issue) string {
+	j := is.jigsaw
+	if j == nil {
+		return ""
+	}
+	return fmt.Sprintf("piece #%d (%s) jigsaw at %v facing %s, pool %s, target %s: ",
+		is.piece, a.pieces[is.piece].tpl.location, j.pos.add(a.shift), j.front, j.pool, j.target)
+}
+
+// summary writes counts per template, a depth histogram and problems grouped
+// by pool and reason.
+func (a *assembler) summary(b *strings.Builder, problems []issue) {
+	type tplCount struct {
+		n, lo, hi int
+	}
+	counts := map[string]*tplCount{}
+	depths := map[int]int{}
+	maxDepth := 0
+	for _, p := range a.pieces {
+		c := counts[p.tpl.location]
+		if c == nil {
+			c = &tplCount{lo: p.depth, hi: p.depth}
+			counts[p.tpl.location] = c
+		}
+		c.n++
+		c.lo, c.hi = min(c.lo, p.depth), max(c.hi, p.depth)
+		depths[p.depth]++
+		maxDepth = max(maxDepth, p.depth)
+	}
+	locs := make([]string, 0, len(counts))
+	for l := range counts {
+		locs = append(locs, l)
+	}
+	sort.Slice(locs, func(x, y int) bool {
+		if counts[locs[x]].n != counts[locs[y]].n {
+			return counts[locs[x]].n > counts[locs[y]].n
+		}
+		return locs[x] < locs[y]
+	})
+	fmt.Fprintf(b, "\nPieces per template (%d templates):\n", len(locs))
+	for _, l := range locs {
+		c := counts[l]
+		if c.lo == c.hi {
+			fmt.Fprintf(b, "  %4d  %s (depth %d)\n", c.n, l, c.lo)
+		} else {
+			fmt.Fprintf(b, "  %4d  %s (depth %d-%d)\n", c.n, l, c.lo, c.hi)
+		}
+	}
+	b.WriteString("\nPieces per depth:")
+	for d := 0; d <= maxDepth; d++ {
+		fmt.Fprintf(b, " %d:%d", d, depths[d])
+	}
+	b.WriteByte('\n')
+	if len(problems) == 0 {
+		return
+	}
+	type group struct {
+		key      string
+		examples []issue
+		n        int
+	}
+	var groups []*group
+	byKey := map[string]*group{}
+	for _, is := range problems {
+		reason, _, _ := strings.Cut(is.msg, "\n")
+		key := reason
+		if is.jigsaw != nil {
+			key = fmt.Sprintf("pool %s, target %s: %s", is.jigsaw.pool, is.jigsaw.target, reason)
+		}
+		g := byKey[key]
+		if g == nil {
+			g = &group{key: key}
+			byKey[key] = g
+			groups = append(groups, g)
+		}
+		g.n++
+		if len(g.examples) < 3 {
+			g.examples = append(g.examples, is)
+		}
+	}
+	sort.SliceStable(groups, func(x, y int) bool { return groups[x].n > groups[y].n })
+	fmt.Fprintf(b, "\nProblems (%d, grouped by pool and reason):\n", len(problems))
+	for _, g := range groups {
+		fmt.Fprintf(b, "  %dx %s\n", g.n, g.key)
+		for _, is := range g.examples {
+			if is.jigsaw == nil {
+				continue
+			}
+			fmt.Fprintf(b, "      e.g. piece #%d (%s) jigsaw at %v facing %s\n", is.piece, a.pieces[is.piece].tpl.location, is.jigsaw.pos.add(a.shift), is.jigsaw.front)
+		}
+		if _, detail, ok := strings.Cut(g.examples[0].msg, "\n"); ok {
+			b.WriteString("      first one's options:\n" + detail + "\n")
+		}
+	}
+}
+
+// coverage reports how often each template was placed over several layouts,
+// and which templates the pools offer but no layout used.
+func coverage(shared *assembler, runs []*assembler, seed int64) string {
+	layouts := map[string]int{}
+	placements := map[string]int{}
+	lo, hi, total := len(runs[0].pieces), 0, 0
+	for _, a := range runs {
+		seen := map[string]bool{}
+		for _, p := range a.pieces {
+			placements[p.tpl.location]++
+			if !seen[p.tpl.location] {
+				seen[p.tpl.location] = true
+				layouts[p.tpl.location]++
+			}
+		}
+		n := len(a.pieces)
+		lo, hi, total = min(lo, n), max(hi, n), total+n
+	}
+	offered := map[string][]string{} // template -> pools offering it
+	for id, p := range shared.pools {
+		for _, el := range p.elements {
+			if el.location != "" {
+				offered[el.location] = append(offered[el.location], id)
+			}
+		}
+	}
+	all := map[string]bool{}
+	for l := range offered {
+		all[l] = true
+	}
+	for l := range placements {
+		all[l] = true
+	}
+	locs := make([]string, 0, len(all))
+	for l := range all {
+		locs = append(locs, l)
+	}
+	sort.Slice(locs, func(x, y int) bool {
+		if layouts[locs[x]] != layouts[locs[y]] {
+			return layouts[locs[x]] > layouts[locs[y]]
+		}
+		return locs[x] < locs[y]
+	})
+	var b strings.Builder
+	n := len(runs)
+	fmt.Fprintf(&b, "\nCoverage over %d seeds (%d to %d): %d to %d pieces per layout, %.1f on average.\n", n, seed, seed+int64(n-1), lo, hi, float64(total)/float64(n))
+	b.WriteString("Layouts each template appears in (and total placements):\n")
+	var never []string
+	for _, l := range locs {
+		if layouts[l] == 0 {
+			never = append(never, l)
+			continue
+		}
+		fmt.Fprintf(&b, "  %d/%d  %s (%d placed)\n", layouts[l], n, l, placements[l])
+	}
+	if len(never) > 0 {
+		fmt.Fprintf(&b, "Never placed in %d seeds:\n", n)
+		for _, l := range never {
+			pools := offered[l]
+			sort.Strings(pools)
+			fmt.Fprintf(&b, "  %s (offered by %s)\n", l, strings.Join(pools, ", "))
+		}
+	} else {
+		b.WriteString("Every template the pools offer was placed at least once.\n")
+	}
 	return b.String()
 }
