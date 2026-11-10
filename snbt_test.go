@@ -151,6 +151,11 @@ func TestSNBTKeys(t *testing.T) {
 	if got := c.String(); got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
+	for k, want := range map[string]string{"a": "a", "_b.c+d-e": "_b.c+d-e", "1": `"1"`, "a:b": `"a:b"`, "": `""`, `say "x"`: `'say "x"'`} {
+		if got := QuoteKey(k); got != want {
+			t.Errorf("QuoteKey(%q) = %s, want %s", k, got, want)
+		}
+	}
 	back, err := ParseSNBT(want)
 	if err != nil || !Equal(back, c) {
 		t.Errorf("round trip: %v %v", back, err)

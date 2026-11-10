@@ -138,11 +138,7 @@ func (t Compound) String() string {
 			b.WriteByte(',')
 		}
 		first = false
-		if isUnquoted(k) {
-			b.WriteString(k)
-		} else {
-			b.WriteString(quoteSNBT(k))
-		}
+		b.WriteString(QuoteKey(k))
 		b.WriteByte(':')
 		b.WriteString(t[k].String())
 	}
@@ -180,6 +176,16 @@ func isUnquoted(s string) bool {
 // escaped (\n, \t, \x01, ...), so the result is always one line.
 func Quote(s string) string {
 	return quoteSNBT(s)
+}
+
+// QuoteKey returns a compound key as SNBT writes it: bare when Minecraft
+// leaves it bare (it starts with a letter, '.' or '_' and holds only
+// letters, digits and "._+-"), quoted with [Quote] otherwise.
+func QuoteKey(k string) string {
+	if isUnquoted(k) {
+		return k
+	}
+	return quoteSNBT(k)
 }
 
 func quoteSNBT(s string) string {
