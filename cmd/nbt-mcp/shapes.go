@@ -464,6 +464,7 @@ type gridIn struct {
 	Legend map[string]string `json:"legend" jsonschema:"what each character means: a block or weighted mix. '.' means no block and ' ' (space) means air unless redefined"`
 	Layers [][]string        `json:"layers" jsonschema:"horizontal layers from bottom (origin y) to top. Each layer is a list of rows from north to south (increasing z); each character in a row is one block going east (increasing x). This is the same layout render_layer draws"`
 	Seed   *int64            `json:"seed,omitempty" jsonschema:"random seed for weighted mixes in the legend"`
+	Ragged bool              `json:"ragged,omitempty" jsonschema:"allow rows and layers of different lengths. By default every row must be as wide as the first and every layer as deep, since one extra character silently widens the piece"`
 }
 
 func (s *state) placeGrid(in gridIn) (string, error) {
@@ -495,6 +496,19 @@ func (s *state) placeGrid(in gridIn) (string, error) {
 		random = random || p.random()
 	}
 	// Check everything before changing the structure.
+	if !in.Ragged && len(in.Layers) > 0 && len(in.Layers[0]) > 0 {
+		width, depth := len([]rune(in.Layers[0][0])), len(in.Layers[0])
+		for y, layer := range in.Layers {
+			if len(layer) != depth {
+				return "", fmt.Errorf("layers[%d] has %d rows but layers[0] has %d; give every layer the same rows (use '.' for no block), or pass ragged=true", y, len(layer), depth)
+			}
+			for z, row := range layer {
+				if w := len([]rune(row)); w != width {
+					return "", fmt.Errorf("layers[%d][%d] is %d characters wide but layers[0][0] is %d, which would make the piece %d wide; pad or trim rows to the same width (use '.' for no block), or pass ragged=true", y, z, w, width, max(w, width))
+				}
+			}
+		}
+	}
 	n := 0
 	for y, layer := range in.Layers {
 		for z, row := range layer {
@@ -510,6 +524,7 @@ func (s *state) placeGrid(in gridIn) (string, error) {
 		return "", fmt.Errorf("the grid has %d positions, more than %d", n, maxVolume)
 	}
 	rng, seed := newRNG(in.Seed)
+	sizeBefore := st.Size
 	placed := 0
 	for y, layer := range in.Layers {
 		for z, row := range layer {
@@ -530,7 +545,11 @@ func (s *state) placeGrid(in gridIn) (string, error) {
 	if random {
 		msg += fmt.Sprintf(", seed %d", seed)
 	}
-	return msg + fmt.Sprintf(". Size is now %v.", st.Size), nil
+	msg += fmt.Sprintf(". Size is now %v.", st.Size)
+	if sizeBefore != st.Size && sizeBefore != ([3]int32{}) {
+		msg += fmt.Sprintf(" Note: the structure grew from %v; check that was meant.", sizeBefore)
+	}
+	return msg, nil
 }
 
 type sealedIn struct {
