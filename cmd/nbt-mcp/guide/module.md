@@ -34,6 +34,7 @@ Every jigsaw's target is the same as its name unless listed otherwise.
 ## Lighting
 - Light every walkable floor position so block light never drops to 0 (hostile mobs spawn at block light 0).
 - In practice: a light source at least every <6-8> blocks along corridors and in every room, placed <hanging from the ceiling | on walls at y=<n>>, using <lantern | torch | ...>.
+- Check it with check_lighting: it lists every roofed floor position dark enough to spawn mobs, with a map of the worst layer.
 
 ## Pieces and owners
 | piece              | size    | connectors                       | owner   |
@@ -48,25 +49,26 @@ Every jigsaw's target is the same as its name unless listed otherwise.
 
 ## Checks before a piece is done
 lint_structure clean (or every finding explained), critique_structure at <score> or above,
-check_jigsaw_fit against <a reference piece>, render_image with cutaway_y on each floor.
+check_lighting finds no dark spawn spots, check_jigsaw_fit against <a reference piece>,
+render_image with cutaway_y on each floor.
 ```
 
 ## Rules for each piece
 
 - **Name structures with your own prefix** (for example `a1_corridor_straight`) when several agents share one server, so nobody opens or overwrites someone else's piece.
-- **Don't use undo when sharing a server.** For now the undo history is shared across all structures and sessions, so one agent's undo can revert another agent's edit. Fix mistakes by editing forward instead: remove_blocks, fill over it, or rebuild the piece. (Per-structure undo is being worked on.)
-- **Build exactly to the module.** The footprint is a multiple of the grid unit. Check the size with describe_structure before saving; a single long row in place_grid can make a piece one block wider than the spec.
+- **Pass name to undo and redo when sharing a server.** The history is shared by everyone connected, so a bare undo steps back the latest edit, which may be another agent's. With name it only steps back your own structure's edits.
+- **Build exactly to the module.** The footprint is a multiple of the grid unit. Check the size with describe_structure before saving. place_grid refuses rows of different lengths, so pad every row to the full width with '.' rather than passing ragged=true.
 - **Put connectors exactly where the spec says**: same height, centred, facing outward, with the spec's final_state. Use place_jigsaw so the orientation and final_state are set properly.
 - **Leave door and corridor gaps exactly the spec's size**, so any corridor fits any door.
-- **Light it as you build**, not at the end: the spec's spacing, in every room and along every corridor.
+- **Light it as you build**, not at the end: the spec's spacing, in every room and along every corridor. check_lighting shows any spot you missed.
 - **Use only the spec's materials.** Variety comes from different pieces and weighted mixes inside the palette, not from each agent choosing its own blocks.
-- **Run the piece checks** (lint, critique, check_jigsaw_fit against a reference piece, a cutaway render of each floor) and save to the spec's path.
+- **Run the piece checks** (lint, critique, check_lighting, check_jigsaw_fit against a reference piece, a cutaway render of each floor) and save to the spec's path.
 
 ## Integrating
 
 One agent (or you) owns the pools and the final check:
 
 1. Write the template pools from the piece table, with fallbacks of small caps.
-2. Run assemble_jigsaw against the datapack with several seeds. It proves every connector lines up and every piece can place before anyone loads a world. Look for pieces that never place and jigsaws that fail for a reason other than their own entry connection.
+2. Run assemble_jigsaw against the datapack with seeds=N (say 10 to 20). It proves every connector lines up and every piece can place before anyone loads a world, and its coverage report lists templates that never placed in any layout. Large layouts come back as a summary (pass detail=summary to ask for one): pieces per template, a depth histogram and problems grouped by reason. Entry jigsaws that point back at their parent are counted separately, so the problems listed are real.
 3. render_image the assembled result, with cutaway_y through each floor.
 4. Fix the pieces that fail and repeat. Because pieces follow the spec, a fix stays local to one piece.
