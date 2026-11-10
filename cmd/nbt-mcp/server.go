@@ -170,8 +170,11 @@ func parseSNBT(s string) (nbt.Compound, error) {
 }
 
 func newServer(s *state) *mcp.Server {
+	rs := &resourceSync{s: s, listed: map[string]bool{}, subscribed: map[string]int{}}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "nbt-mcp", Title: "Minecraft structure builder", Version: version()},
-		&mcp.ServerOptions{Instructions: instructions})
+		&mcp.ServerOptions{Instructions: instructions, SubscribeHandler: rs.subscribe, UnsubscribeHandler: rs.unsubscribe})
+	rs.srv = srv
+	addStructureResources(srv, rs)
 
 	addTool(srv, s, kindEdit, "create_structure", "Create structure",
 		"Start a new, empty structure in memory. Replaces any open structure with the same name.",
