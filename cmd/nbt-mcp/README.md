@@ -1,6 +1,10 @@
 # nbt-mcp
 
-An MCP server that lets a model build Minecraft Java Edition structure files (`.nbt`).
+An MCP server that lets an AI model build Minecraft Java Edition structure files (`.nbt`): the files structure blocks save, and that `/place template` and data packs load.
+
+The model works on structures held in memory. It places blocks with fills, shapes and text grids, looks at the result as text or rendered images, checks it with a linter and a style critique, and saves it as a file the game can load. It also understands jigsaw structures such as villages.
+
+Contents: [Install](#install) · [Add it to a client](#add-it-to-a-client) · [Use the files in a world](#use-the-files-in-a-world) · [Tools](#tools) · [Seeing the structure](#seeing-the-structure) · [Building guide and critique](#building-guide-and-critique) · [Jigsaw structures](#jigsaw-structures) · [Flags](#flags) · [Compatibility](#compatibility)
 
 ## Install
 
@@ -76,70 +80,94 @@ In this mode:
 - Requests from web pages on other sites are refused.
 - There is no login. Keep it on `localhost`, or set the `NBT_MCP_TOKEN` environment variable so clients must send that value as a bearer token (`Authorization: Bearer ...`). Put it behind a TLS proxy if it is reachable from other machines.
 
-## Compatibility
+## Use the files in a world
 
-Tool input schemas stick to the plain subset of JSON Schema that MCP clients and model APIs share: one type per property, enums for options, no `anyOf`, `oneOf` or `$ref`. Every tool has a title and annotations, so clients can tell the read-only tools (rendering, describing, linting) from the ones that edit a structure in memory and from `save_structure`, which writes a file.
-
-Calls are forgiving. `null` for an optional field counts as leaving it out, and mistakes come back as tool errors that say what is allowed.
-
-The server is built on the official Go SDK and negotiates whichever protocol version the client asks for, up to 2026-07-28.
-
-## Flags
-
-| Flag              | Default | Meaning                                                                                                      |
-| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
-| `-dir`            | `.`     | Directory that relative paths in `save_structure` and `load_structure` resolve against.                      |
-| `-data-version`   | `5023`  | DataVersion for new structures (`5023` is 26.3, `4189` is 1.21.4). Newer game versions upgrade older data but older ones can't read newer data, so lower it to target an older game. |
-| `-http`           |         | Serve MCP over HTTP on this address, such as `localhost:8765`, instead of stdin/stdout. The endpoint is `/mcp`. |
-| `-restrict-paths` | off     | Only read and write files inside `-dir`. Always on with `-http`.                                              |
-| `-version`        |         | Print the version and exit.                                                                                  |
+Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `structures` before 1.21). Then load it with a structure block in Load mode, or run `/place template <namespace>:<name>`. Structure blocks can only load up to 48 blocks on each axis, but `/place template` has no such limit.
 
 ## Tools
 
-| Tool                 | What it does                                                                         |
-| -------------------- | ------------------------------------------------------------------------------------ |
-| `create_structure`   | Start an empty structure in memory, optionally with a specific `data_version`.       |
-| `load_structure`     | Open an existing `.nbt` file.                                                        |
-| `list_structures`    | List the open structures.                                                            |
-| `set_blocks`         | Place a batch of blocks, each with optional block entity SNBT (chest loot and so on). |
-| `fill`               | Fill a box, like `/fill`, in `replace`, `hollow` or `outline` mode.                  |
-| `fill_ellipsoid`     | A sphere or ellipsoid, solid or as a watertight shell.                               |
-| `fill_cylinder`      | A cylinder along any axis: solid, shell, open tube or ring, or a disc.               |
-| `fill_tube`          | A rounded, optionally tapering tube along a path of points (trunks, roots, pipes).   |
-| `decorate_surface`   | Put a block on, or swap in for, the exposed faces of solid blocks (moss, snow, vines, grass). |
-| `place_grid`         | Place many blocks from text layers and a legend, the inverse of `render_layer`.      |
-| `check_sealed`       | Flood-fill from a point to check that a space is watertight, and find the gap if it isn't. |
-| `transform_structure`| Rotate and/or mirror a structure in place, turning block states to match.            |
-| `paste_structure`    | Copy one structure into another, optionally rotated or mirrored.                     |
-| `crop_structure`     | Cut a structure down to a box.                                                       |
-| `set_size`           | Set the size explicitly, to add margin or trim.                                      |
-| `remove_blocks`      | Clear a box back to "no block", so placing the structure leaves the world unchanged there. |
-| `add_entity`         | Add an entity with optional SNBT.                                                    |
+**Structures**
+
+| Tool | What it does |
+| --- | --- |
+| `create_structure` | Start an empty structure in memory, optionally with a specific `data_version`. |
+| `load_structure` | Open an existing `.nbt` file. |
+| `list_structures` | List the open structures. |
+| `save_structure` | Write a gzip-compressed `.nbt` file. |
+
+**Placing blocks**
+
+| Tool | What it does |
+| --- | --- |
+| `set_blocks` | Place a batch of blocks, each with optional block entity SNBT (chest loot and so on). |
+| `fill` | Fill a box, like `/fill`, in `replace`, `hollow` or `outline` mode. |
+| `fill_ellipsoid` | A sphere or ellipsoid, solid or as a watertight shell. |
+| `fill_cylinder` | A cylinder along any axis: solid, shell, open tube or ring, or a disc. |
+| `fill_tube` | A rounded, optionally tapering tube along a path of points (trunks, roots, pipes). |
+| `place_grid` | Place many blocks from text layers and a legend, the inverse of `render_layer`. |
+| `decorate_surface` | Put a block on, or swap in for, the exposed faces of solid blocks (moss, snow, vines, grass). |
+| `remove_blocks` | Clear a box back to "no block", so placing the structure leaves the world unchanged there. |
+| `add_entity` | Add an entity with optional SNBT. |
+
+**Reshaping**
+
+| Tool | What it does |
+| --- | --- |
+| `transform_structure` | Rotate and/or mirror a structure in place, turning block states to match. |
+| `paste_structure` | Copy one structure into another, optionally rotated or mirrored. |
+| `crop_structure` | Cut a structure down to a box. |
+| `set_size` | Set the size explicitly, to add margin or trim. |
+
+**Looking**
+
+| Tool | What it does |
+| --- | --- |
 | `describe_structure` | Size, share of blocks, air and empty space, block counts by type, entities, and jigsaw blocks with warnings. |
-| `diff_structures`    | Compare two structures: what changed, grouped by kind, with positions.               |
-| `render_layer`       | A top-down text drawing of one y layer, so the model can check its work.            |
-| `lint_structure`     | Check for common mistakes: format, renamed ids, blocks newer than the DataVersion, wall and fence connections, missing support, falling blocks over air, doors, beds and tall plants missing a half, fire or lava next to flammables, overhangs, floating parts, empty containers, valuable blocks, jigsaw settings. |
-| `render_view`        | A text projection from the top, bottom or any side: the first block along each line of sight, or its depth. |
-| `render_image`       | PNG images from several viewpoints in one call: isometric from each corner, plan, the four elevations, or presets (`corners`, `elevations`, `overview`, `all`). `cutaway_y` and `from`/`to` cut it open to show interiors. |
-| `place_jigsaw`       | Place a jigsaw block with typed settings. `final_state` defaults to the block it replaces. |
-| `check_jigsaw_fit`   | Check where a child piece lands on a parent's jigsaws in each rotation, and whether it fits. |
-| `assemble_jigsaw`    | Assemble a whole jigsaw layout from a start piece and template pools, and open the result. |
-| `critique_structure` | Score how hand-crafted a build looks (survival or creative style) and list fixes: flat walls, palette, detail blocks, silhouette, overhangs, foundation, windows, asymmetry, survival materials. |
-| `building_guide`     | The building guide: principles, survival and creative styles, and palettes by theme. |
-| `save_structure`     | Write a gzip-compressed `.nbt` file.                                                 |
+| `render_image` | PNG images from several viewpoints in one call. See [Seeing the structure](#seeing-the-structure). |
+| `render_view` | A text projection from the top, bottom or any side: the first block along each line of sight, or its depth. |
+| `render_layer` | A top-down text drawing of one y layer. |
+| `diff_structures` | Compare two structures: what changed, grouped by kind, with positions. |
+
+**Checking**
+
+| Tool | What it does |
+| --- | --- |
+| `lint_structure` | Check for common mistakes. See [Lint checks](#lint-checks). |
+| `critique_structure` | Score how hand-crafted a build looks and list the fixes worth most. See [Building guide and critique](#building-guide-and-critique). |
+| `check_sealed` | Flood-fill from a point to check that a space is watertight, and find the gap if it isn't. |
+| `building_guide` | The building guide: principles, survival and creative styles, jigsaw design, and palettes by theme. |
+
+**Jigsaw**
+
+| Tool | What it does |
+| --- | --- |
+| `place_jigsaw` | Place a jigsaw block with typed settings. `final_state` defaults to the block it replaces. |
+| `check_jigsaw_fit` | Check where a child piece lands on a parent's jigsaws in each rotation, and whether it fits. |
+| `assemble_jigsaw` | Assemble a whole jigsaw layout from a start piece and template pools, and open the result. |
 
 Blocks use command syntax (`oak_stairs[facing=east,half=bottom]`), and the `minecraft:` namespace is optional. Wherever a tool fills an area, the block can also be a weighted mix such as `70%stone_bricks,20%cracked_stone_bricks,10%mossy_stone_bricks` (`3*stone,1*andesite` works too). Every random tool takes a `seed` and reports the seed it used, so a result can be reproduced.
 
 Hollow shapes are watertight: every inside position is cut off from the outside on all six faces, so water and mobs can't get through diagonal gaps. By default the inside is filled with air, which clears out water or terrain when the structure is placed.
 
-## Building guide and critique
+### Lint checks
 
-Models tend to build boxes: flat walls of one block, a flat roof, no small blocks, perfect symmetry. The server ships a building guide to steer them away from that, and a critique tool to check the result.
+`lint_structure` runs all of these unless `checks` picks some. They are name-based rules of thumb, since the server has no block registry, so treat findings as things to look at.
 
-- **Guide.** `building_guide` returns the guide as text; the same sections are MCP resources (`nbt-mcp://guide/building`, `.../survival`, `.../creative`, `.../jigsaw`, `.../palettes`). It covers silhouette, depth (frame and set-back infill, overhangs), palette gradients, detailing with partial blocks, asymmetry and interiors, plus palettes per theme (medieval, castle, nordic, desert, swamp, ruined, nether). The jigsaw section covers designing pieces and pools that vary well: grid modules, connector naming, variants and slots, jitter with several identical jigsaws, fallback terminators, priorities, terrain blending and processors for weathering.
-- **Styles.** *Survival* builds are ones a player could make: common, biome-appropriate materials, 3 to 10 block types, detail where it counts. *Creative* builds are showpieces: rich palettes with texture gradients, dense detail and complex shapes.
-- **Prompt.** The `build` prompt (a slash command in Claude Code: `/minecraft:build`) takes a description, style, theme, name and whether it is a jigsaw structure, and walks the model through plan, block out, depth, detail, interior, critique and lint, with the guide attached.
-- **Critique.** `critique_structure` looks at what is visible from outside and scores each category from 0 to 100 against the style's targets, then lists the fixes worth most with coordinates. Use `from` and `to` to critique one building in a larger structure.
+| Check | Finds |
+| --- | --- |
+| `format` | Problems with the file's structure: palette, block positions, entities. |
+| `renamed` | Block ids that were renamed between game versions. |
+| `newer` | Blocks added in a game version newer than the file's DataVersion. |
+| `connections` | Walls, fences, panes and bars whose connections don't match their neighbours. |
+| `support` | Torches, lanterns, vines, signs, buttons and other blocks with nothing to attach to. |
+| `gravity` | Sand, gravel, concrete powder and other falling blocks with nothing under them. |
+| `halves` | Doors, beds and tall plants missing their other half. |
+| `fire` | Fire and lava next to blocks that burn. |
+| `unsupported` | Solid blocks with nothing anywhere below them, such as legs hanging past the edge of a plinth. |
+| `floating` | Groups of blocks that don't touch the bottom layer or anything connected to it. |
+| `containers` | Chests, barrels and other containers with no loot table or items. |
+| `valuables` | High-value blocks such as gold, diamond and netherite blocks. |
+| `jigsaw` | Jigsaw block settings. |
 
 ## Seeing the structure
 
@@ -154,6 +182,15 @@ To see inside, `cutaway_y` hides everything above a height. With `top` that give
 
 Colors approximate each block's map color; there are no textures. Slabs, stairs, fences, walls, panes, doors, trapdoors, carpets, torches, lanterns, plants and other partial blocks are drawn with their rough shape. Glass, ice and water are see-through. For exact positions, use the text views (`render_view`, `render_layer`).
 
+## Building guide and critique
+
+Models tend to build boxes: flat walls of one block, a flat roof, no small blocks, perfect symmetry. The server ships a building guide to steer them away from that, and a critique tool to check the result.
+
+- **Guide.** `building_guide` returns the guide as text; the same sections are MCP resources (`nbt-mcp://guide/building`, `.../survival`, `.../creative`, `.../jigsaw`, `.../palettes`). It covers silhouette, depth (frame and set-back infill, overhangs), palette gradients, detailing with partial blocks, asymmetry and interiors, plus palettes per theme (medieval, castle, nordic, desert, swamp, ruined, nether). The jigsaw section covers designing pieces and pools that vary well: grid modules, connector naming, variants and slots, jitter with several identical jigsaws, fallback terminators, priorities, terrain blending and processors for weathering.
+- **Styles.** *Survival* builds are ones a player could make: common, biome-appropriate materials, 3 to 10 block types, detail where it counts. *Creative* builds are showpieces: rich palettes with texture gradients, dense detail and complex shapes.
+- **Prompt.** The `build` prompt (a slash command in Claude Code: `/minecraft:build`) takes a description, style, theme, name and whether it is a jigsaw structure, and walks the model through plan, block out, depth, detail, interior, critique and lint, with the guide attached.
+- **Critique.** `critique_structure` looks at what is visible from outside and scores each category from 0 to 100 against the style's targets, then lists the fixes worth most with coordinates. Use `from` and `to` to critique one building in a larger structure.
+
 ## Jigsaw structures
 
 The jigsaw tools follow the game's placement code (`JigsawPlacement`) for rigid pieces. The rules that most often cause surprises:
@@ -166,9 +203,23 @@ The jigsaw tools follow the game's placement code (`JigsawPlacement`) for rigid 
 
 `assemble_jigsaw` reads template pools from a datapack folder (`data/<ns>/worldgen/template_pool/`) or from inline JSON in the same format, and finds pieces among the open structures or in the datapack's `data/<ns>/structure/` folder. It ignores terrain, processors, and `terrain_matching` height changes, so use it to check how pieces connect, not how they sit on the ground.
 
-## Using the files in a world
+## Flags
 
-Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `structures` before 1.21). Then load it with a structure block in Load mode, or run `/place template <namespace>:<name>`. Structure blocks can only load up to 48 blocks on each axis, but `/place template` has no such limit.
+| Flag              | Default | Meaning                                                                                                      |
+| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| `-dir`            | `.`     | Directory that relative paths in `save_structure` and `load_structure` resolve against.                      |
+| `-data-version`   | `5023`  | DataVersion for new structures (`5023` is 26.3, `4189` is 1.21.4). Newer game versions upgrade older data but older ones can't read newer data, so lower it to target an older game. |
+| `-http`           |         | Serve MCP over HTTP on this address, such as `localhost:8765`, instead of stdin/stdout. The endpoint is `/mcp`. |
+| `-restrict-paths` | off     | Only read and write files inside `-dir`. Always on with `-http`.                                              |
+| `-version`        |         | Print the version and exit.                                                                                  |
+
+## Compatibility
+
+Tool input schemas stick to the plain subset of JSON Schema that MCP clients and model APIs share: one type per property, enums for options, no `anyOf`, `oneOf` or `$ref`. Every tool has a title and annotations, so clients can tell the read-only tools (rendering, describing, linting) from the ones that edit a structure in memory and from `save_structure`, which writes a file.
+
+Calls are forgiving. `null` for an optional field counts as leaving it out, and mistakes come back as tool errors that say what is allowed.
+
+The server is built on the official Go SDK and negotiates whichever protocol version the client asks for, up to 2026-07-28.
 
 ## License
 

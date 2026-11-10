@@ -11,3 +11,7 @@
 .idea/
 .vscode/
 .DS_Store
+
+# Local workspace for building the server against the library
+go.work
+go.work.sum
