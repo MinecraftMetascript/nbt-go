@@ -27,10 +27,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// defaultDataVersion is Minecraft 1.21.4. An older DataVersion is the safe
-// default: newer games upgrade older structure data when loading it, but an
-// older game cannot read data from the future.
-const defaultDataVersion = 4189
+// defaultDataVersion is Minecraft 26.3, the latest release. Files written for
+// it use the 26.3 palette keys and won't load in older games; pass
+// -data-version 4189 (1.21.4) or similar to target an older one.
+const defaultDataVersion = 5023
 
 func main() {
 	dir := flag.String("dir", ".", "directory that relative save and load paths resolve against")

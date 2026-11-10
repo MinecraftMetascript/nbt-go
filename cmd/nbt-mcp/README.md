@@ -38,7 +38,7 @@ If the client can't find the command, use the full path from `which nbt-mcp`.
 | Flag            | Default | Meaning                                                                                                      |
 | --------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
 | `-dir`          | `.`     | Directory that relative paths in `save_structure` and `load_structure` resolve against.                      |
-| `-data-version` | `4189`  | DataVersion for new structures (`4189` is 1.21.4, `5023` is 26.3). Newer game versions upgrade older data, so a lower value is the safer default. |
+| `-data-version` | `5023`  | DataVersion for new structures (`5023` is 26.3, `4189` is 1.21.4). Newer game versions upgrade older data but older ones can't read newer data, so lower it to target an older game. |
 | `-version`      |         | Print the version and exit.                                                                                  |
 
 ## Tools
