@@ -93,7 +93,7 @@ Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `str
 | `create_structure` | Start an empty structure in memory, optionally with a specific `data_version`. |
 | `load_structure` | Open an existing `.nbt` file. |
 | `list_structures` | List the open structures. |
-| `save_structure` | Write a gzip-compressed `.nbt` file. |
+| `save_structure` | Write a gzip-compressed `.nbt` file, dropping palette entries no block uses. |
 | `undo`, `redo` | Step back and forward through edits. See [Undo](#undo). |
 
 **Placing blocks**
@@ -101,7 +101,7 @@ Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `str
 | Tool | What it does |
 | --- | --- |
 | `set_blocks` | Place a batch of blocks, each with optional block entity SNBT (chest loot and so on). |
-| `fill` | Fill a box, like `/fill`, in `replace`, `hollow` or `outline` mode. |
+| `fill` | Fill a box, like `/fill`, in `replace`, `hollow`, `outline` or `ring` (side walls only) mode. |
 | `fill_ellipsoid` | A sphere or ellipsoid, solid or as a watertight shell. |
 | `fill_cylinder` | A cylinder along any axis: solid, shell, open tube or ring, or a disc. |
 | `fill_tube` | A rounded, optionally tapering tube along a path of points (trunks, roots, pipes). |

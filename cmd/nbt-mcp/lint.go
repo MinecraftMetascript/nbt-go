@@ -178,7 +178,9 @@ func (l *linter) format() {
 		}
 	}
 	for i, n := range used {
-		if n == 0 {
+		// save_structure drops unused entries from a single palette, so
+		// only report them where they would be written.
+		if n == 0 && len(st.Palettes) > 0 {
 			l.add("format", noPos, "palette entry %d (%s) isn't used by any block", i, palette(st)[i])
 		}
 	}

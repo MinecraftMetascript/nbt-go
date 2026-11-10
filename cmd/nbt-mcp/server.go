@@ -193,7 +193,7 @@ func newServer(s *state) *mcp.Server {
 		handler(s.setBlocks))
 
 	addTool(srv, s, kindEdit, "fill", "Fill box",
-		"Fill a box with one block or a weighted mix, like the /fill command. Corners are inclusive. Mode \"replace\" fills the whole box, \"hollow\" fills the shell and puts air inside, and \"outline\" fills only the shell and leaves the inside unchanged.",
+		"Fill a box with one block or a weighted mix, like the /fill command. Corners are inclusive. Mode \"replace\" fills the whole box, \"hollow\" fills the shell and puts air inside, \"outline\" fills only the shell and leaves the inside unchanged, and \"ring\" fills only the four side walls (no floor or ceiling), which on a one-block-thick layer is just its edge.",
 		handler(s.fill))
 
 	addTool(srv, s, kindEdit, "fill_ellipsoid", "Fill sphere or ellipsoid",
@@ -442,7 +442,7 @@ func (b boxIn) bounds() (lo, hi [3]int, err error) {
 type fillIn struct {
 	boxIn
 	Block string `json:"block" jsonschema:"block in command syntax, e.g. stone_bricks, or a weighted mix such as 70%stone_bricks,30%cracked_stone_bricks"`
-	Mode  string `json:"mode,omitempty" enum:"replace,hollow,outline" jsonschema:"replace (default), hollow, or outline"`
+	Mode  string `json:"mode,omitempty" enum:"replace,hollow,outline,ring" jsonschema:"replace (default), hollow, outline, or ring (only the four side walls of every layer, inside unchanged, so a one-block-thick layer gets just its edge)"`
 	Seed  *int64 `json:"seed,omitempty" jsonschema:"random seed for block mixes; a random one is used and reported if omitted"`
 }
 
@@ -464,15 +464,19 @@ func (s *state) fill(in fillIn) (string, error) {
 	if mode == "" {
 		mode = "replace"
 	}
-	if mode != "replace" && mode != "hollow" && mode != "outline" {
-		return "", fmt.Errorf("unknown mode %q; use replace, hollow or outline", in.Mode)
+	if mode != "replace" && mode != "hollow" && mode != "outline" && mode != "ring" {
+		return "", fmt.Errorf("unknown mode %q; use replace, hollow, outline or ring", in.Mode)
 	}
 	air := structure.BlockState{Name: "minecraft:air"}
 	n := 0
 	for x := lo[0]; x <= hi[0]; x++ {
 		for y := lo[1]; y <= hi[1]; y++ {
 			for z := lo[2]; z <= hi[2]; z++ {
-				edge := x == lo[0] || x == hi[0] || y == lo[1] || y == hi[1] || z == lo[2] || z == hi[2]
+				side := x == lo[0] || x == hi[0] || z == lo[2] || z == hi[2]
+				edge := side || y == lo[1] || y == hi[1]
+				if mode == "ring" && !side {
+					continue
+				}
 				place := pat.pick(rng)
 				if !edge {
 					switch mode {
@@ -716,6 +720,7 @@ func (s *state) save(in saveIn) (string, error) {
 	if filepath.Ext(path) != ".nbt" {
 		path += ".nbt"
 	}
+	st, pruned := pruneStates(st)
 	if err := st.Validate(); err != nil {
 		return "", err
 	}
@@ -738,8 +743,54 @@ func (s *state) save(in saveIn) (string, error) {
 		return "", err
 	}
 	note := ""
+	if pruned > 0 {
+		note += fmt.Sprintf("\nDropped %d palette entries no block uses.", pruned)
+	}
 	if st.Size[0] > 48 || st.Size[1] > 48 || st.Size[2] > 48 {
-		note = "\nNote: it is larger than 48 blocks on some axis, so a structure block cannot load all of it; use /place template instead."
+		note += "\nNote: it is larger than 48 blocks on some axis, so a structure block cannot load all of it; use /place template instead."
 	}
 	return fmt.Sprintf("Saved %q (%d x %d x %d, %d blocks) to %s.%s", in.Name, st.Size[0], st.Size[1], st.Size[2], len(st.Blocks), path, note), nil
+}
+
+// pruneStates returns st without palette entries that no block uses, which
+// replacing blocks leaves behind, and how many it dropped. st itself is not
+// changed. Structures with several palette variants are left alone, since
+// their entries are shared by every variant.
+func pruneStates(st *structure.Structure) (*structure.Structure, int) {
+	if len(st.Palettes) > 0 {
+		return st, 0
+	}
+	used := make([]bool, len(st.Palette))
+	for _, b := range st.Blocks {
+		if b.State >= 0 && int(b.State) < len(used) {
+			used[b.State] = true
+		}
+	}
+	unused := 0
+	for _, u := range used {
+		if !u {
+			unused++
+		}
+	}
+	if unused == 0 {
+		return st, 0
+	}
+	out := structure.New(st.DataVersion)
+	out.Size, out.Entities = st.Size, st.Entities
+	remap := make([]int32, len(st.Palette))
+	out.Palette = make([]structure.BlockState, 0, len(st.Palette)-unused)
+	for i, bs := range st.Palette {
+		if used[i] {
+			remap[i] = int32(len(out.Palette))
+			out.Palette = append(out.Palette, bs)
+		}
+	}
+	out.Blocks = make([]structure.Block, len(st.Blocks))
+	for i, b := range st.Blocks {
+		if b.State >= 0 && int(b.State) < len(remap) {
+			b.State = remap[b.State]
+		}
+		out.Blocks[i] = b
+	}
+	return out, unused
 }
