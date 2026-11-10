@@ -39,8 +39,8 @@ func guideText(topic string) (string, error) {
 func guideURI(topic string) string { return "nbt-mcp://guide/" + topic }
 
 type guideIn struct {
-	Topics []string `json:"topics,omitempty" jsonschema:"sections to return: building, survival, creative, jigsaw, palettes (default building)"`
-	Style  string   `json:"style,omitempty" jsonschema:"survival or creative: adds that style's section and the palettes"`
+	Topics []string `json:"topics,omitempty" enum:"building,survival,creative,jigsaw,palettes" jsonschema:"sections to return: building, survival, creative, jigsaw, palettes (default building)"`
+	Style  string   `json:"style,omitempty" enum:"survival,creative" jsonschema:"survival or creative: adds that style's section and the palettes"`
 }
 
 func (s *state) guide(in guideIn) (string, error) {
@@ -92,10 +92,9 @@ func addGuide(srv *mcp.Server, s *state) {
 	for i, t := range guideTopics {
 		topics[i] = t.name + " (" + t.about + ")"
 	}
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "building_guide",
-		Description: "Read the building guide before designing a structure, so it looks hand-crafted rather than generated. Topics: " + strings.Join(topics, "; ") + ". Pass style=survival or style=creative to get the principles plus that style and its palettes.",
-	}, handler(s, s.guide))
+	addTool(srv, kindRead, "building_guide", "Building guide",
+		"Read the building guide before designing a structure, so it looks hand-crafted rather than generated. Topics: "+strings.Join(topics, "; ")+". Pass style=survival or style=creative to get the principles plus that style and its palettes.",
+		handler(s, s.guide))
 
 	srv.AddPrompt(&mcp.Prompt{
 		Name:        "build",

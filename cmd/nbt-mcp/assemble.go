@@ -26,7 +26,7 @@ type assembleIn struct {
 	Pools         map[string]any `json:"pools,omitempty" jsonschema:"template pools given inline, keyed by id, in the same JSON format as template_pool files, e.g. {\"mypack:statues\": {\"fallback\": \"minecraft:empty\", \"elements\": [{\"weight\": 1, \"element\": {\"element_type\": \"minecraft:single_pool_element\", \"location\": \"mypack:statue\", \"projection\": \"rigid\", \"processors\": \"minecraft:empty\"}}]}}. These override the datapack's. Element locations can name open structures"`
 	MaxDepth      int            `json:"max_depth,omitempty" jsonschema:"the structure's size: how many pieces deep to go from the start piece (default 7, at most 20)"`
 	MaxDistance   int            `json:"max_distance,omitempty" jsonschema:"max_distance_from_center: how far pieces may reach from the start piece's center (default 80, at most 128)"`
-	StartRotation string         `json:"start_rotation,omitempty" jsonschema:"rotation of the start piece: none (default), clockwise_90, 180, counterclockwise_90 or random"`
+	StartRotation string         `json:"start_rotation,omitempty" enum:"none,clockwise_90,180,counterclockwise_90,random" jsonschema:"rotation of the start piece: none (default), clockwise_90, 180, counterclockwise_90 or random"`
 	Seed          *int64         `json:"seed,omitempty" jsonschema:"random seed; the same seed and inputs give the same layout. A random one is used and reported if omitted"`
 	KeepJigsaws   bool           `json:"keep_jigsaws,omitempty" jsonschema:"leave jigsaw blocks in the result instead of replacing them with their final_state"`
 }

@@ -14,7 +14,7 @@ type shapeOpts struct {
 	Block     string `json:"block" jsonschema:"block, or a weighted mix such as 70%stone,20%andesite,10%cobblestone"`
 	Hollow    bool   `json:"hollow,omitempty" jsonschema:"only build the shell. Shells are watertight: every block of the inside is cut off from the outside on all six faces"`
 	Thickness int    `json:"thickness,omitempty" jsonschema:"shell thickness in blocks when hollow (default 1)"`
-	Interior  string `json:"interior,omitempty" jsonschema:"when hollow: air (default) fills the inside with air so placing the shape clears it (and keeps water out), keep leaves it unchanged"`
+	Interior  string `json:"interior,omitempty" enum:"air,keep" jsonschema:"when hollow: air (default) fills the inside with air so placing the shape clears it (and keeps water out), keep leaves it unchanged"`
 	Seed      *int64 `json:"seed,omitempty" jsonschema:"random seed for block mixes; a random one is used and reported if omitted"`
 }
 
@@ -198,7 +198,7 @@ func (s *state) ellipsoid(in ellipsoidIn) (string, error) {
 type cylinderIn struct {
 	Name     string     `json:"name"`
 	Base     [3]float64 `json:"base" jsonschema:"center of the bottom end [x, y, z] (for axis x or z, the end with the lowest coordinate). Use .5 on the cross-section axes for an even width"`
-	Axis     string     `json:"axis,omitempty" jsonschema:"axis the cylinder runs along: y (default, upright), x or z"`
+	Axis     string     `json:"axis,omitempty" enum:"y,x,z" jsonschema:"axis the cylinder runs along: y (default, upright), x or z"`
 	Height   int        `json:"height" jsonschema:"length along the axis in blocks; 1 makes a disc"`
 	Radius   float64    `json:"radius,omitempty" jsonschema:"radius of a round cross-section"`
 	Radii    []float64  `json:"radii,omitempty" jsonschema:"radii of an elliptical cross-section, in x, y, z order skipping the axis (e.g. [rx, rz] for axis y)"`
@@ -351,8 +351,8 @@ func (s *state) tube(in tubeIn) (string, error) {
 type decorateIn struct {
 	Name   string   `json:"name"`
 	Block  string   `json:"block" jsonschema:"block or weighted mix to apply, e.g. moss_carpet or 50%vine[north=true],50%air"`
-	Faces  []string `json:"faces,omitempty" jsonschema:"which exposed faces to decorate: up, down, north, south, east, west (default [up])"`
-	Mode   string   `json:"mode,omitempty" jsonschema:"on (default) places the block in the empty space against the face, like moss carpet or snow on top; replace swaps the surface block itself, like turning the top of a mound into grass_block"`
+	Faces  []string `json:"faces,omitempty" enum:"up,down,north,south,east,west" jsonschema:"which exposed faces to decorate: up, down, north, south, east, west (default [up])"`
+	Mode   string   `json:"mode,omitempty" enum:"on,replace" jsonschema:"on (default) places the block in the empty space against the face, like moss carpet or snow on top; replace swaps the surface block itself, like turning the top of a mound into grass_block"`
 	Chance float64  `json:"chance,omitempty" jsonschema:"probability from 0 to 1 that each surface position is decorated (default 1)"`
 	Only   []string `json:"only,omitempty" jsonschema:"only decorate faces of these blocks, e.g. [stone, andesite]; default any solid block"`
 	From   *[3]int  `json:"from,omitempty" jsonschema:"limit to a box: first corner [x, y, z]"`

@@ -53,8 +53,8 @@ var viewDescriptions = map[string]string{
 
 type imageIn struct {
 	Name     string   `json:"name"`
-	Views    []string `json:"views,omitempty" jsonschema:"views to render, one image each (at most 9): iso_se, iso_sw, iso_nw, iso_ne (isometric from each corner), top, bottom, south (front), north, east, west; or a preset: corners (all four isometric), elevations (all four sides), overview (iso_se, iso_nw, top, south, east), all. Default iso_se"`
-	View     string   `json:"view,omitempty" jsonschema:"a single view; same names as views"`
+	Views    []string `json:"views,omitempty" enum:"iso_se,iso_sw,iso_nw,iso_ne,top,bottom,south,north,east,west,corners,elevations,overview,all" jsonschema:"views to render, one image each (at most 9): iso_se, iso_sw, iso_nw, iso_ne (isometric from each corner), top, bottom, south (front), north, east, west; or a preset: corners (all four isometric), elevations (all four sides), overview (iso_se, iso_nw, top, south, east), all. Default iso_se"`
+	View     string   `json:"view,omitempty" enum:"iso_se,iso_sw,iso_nw,iso_ne,top,bottom,south,north,east,west,corners,elevations,overview,all" jsonschema:"a single view; same names as views"`
 	Scale    int      `json:"scale,omitempty" jsonschema:"pixels per block (default fits about 800 pixels for one view, 480 for several; at most 24)"`
 	From     *[3]int  `json:"from,omitempty" jsonschema:"only draw a box: first corner [x, y, z]. Cut away part of a structure to look inside, e.g. from=[0,0,5] hides everything north of z=5 so a south view shows that cross-section"`
 	To       *[3]int  `json:"to,omitempty" jsonschema:"only draw a box: opposite corner [x, y, z], inclusive"`
