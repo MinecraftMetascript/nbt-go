@@ -169,8 +169,11 @@ func TestGuide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if txt := pr.Messages[0].Content.(*mcp.TextContent).Text; !strings.Contains(txt, "# Jigsaw structures") || !strings.Contains(txt, "assemble_jigsaw over at least five seeds") {
+	if txt := pr.Messages[0].Content.(*mcp.TextContent).Text; !strings.Contains(txt, "# Jigsaw structures") || !strings.Contains(txt, "# Building pieces to a module") || !strings.Contains(txt, "assemble_jigsaw over at least five seeds") {
 		t.Error("prompt for a village is missing the jigsaw section")
+	}
+	if out := call(t, cs, "building_guide", map[string]any{"topics": []string{"module"}}, false); !strings.Contains(out, "## Write the spec first") || !strings.Contains(out, "undo") {
+		t.Error("module topic is missing the spec template or the undo warning")
 	}
 	if out := call(t, cs, "building_guide", map[string]any{"topics": []string{"jigsaw"}}, false); !strings.Contains(out, "## Jitter") {
 		t.Error("jigsaw topic is missing the jitter section")
