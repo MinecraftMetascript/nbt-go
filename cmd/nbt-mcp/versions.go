@@ -30,6 +30,16 @@ func dataVersionLabel(dv int32) string {
 	return fmt.Sprint(dv)
 }
 
+// versionName is the release with exactly this DataVersion, or "".
+func versionName(dv int32) string {
+	for _, v := range knownVersions {
+		if v.dataVersion == dv {
+			return v.name
+		}
+	}
+	return ""
+}
+
 func indexOfVersion(name string) int {
 	for i, v := range knownVersions {
 		if v.name == name {

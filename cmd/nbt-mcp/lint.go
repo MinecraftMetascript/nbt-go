@@ -60,10 +60,11 @@ func (l *linter) describe(p vec) string {
 	return bs.String()
 }
 
-func (s *state) lint(in lintIn) (string, error) {
+func (s *state) lint(in lintIn) (string, lintOut, error) {
+	var out lintOut
 	st, err := s.get(in.Name)
 	if err != nil {
-		return "", err
+		return "", out, err
 	}
 	run := map[string]bool{}
 	for _, c := range in.Checks {
@@ -78,7 +79,7 @@ func (s *state) lint(in lintIn) (string, error) {
 			for i, lc := range lintChecks {
 				names[i] = lc.name
 			}
-			return "", fmt.Errorf("unknown check %q; use %s", c, strings.Join(names, ", "))
+			return "", out, fmt.Errorf("unknown check %q; use %s", c, strings.Join(names, ", "))
 		}
 		run[c] = true
 	}
@@ -107,19 +108,25 @@ func (s *state) lint(in lintIn) (string, error) {
 			continue
 		}
 		total += len(fs)
+		co := lintCheckOut{Check: lc.name, About: lc.about, Count: len(fs), Findings: []lintFinding{}}
 		fmt.Fprintf(&b, "\n%s (%d): %s\n", lc.name, len(fs), lc.about)
 		for i, f := range fs {
 			if i == limit {
 				fmt.Fprintf(&b, "  ... and %d more\n", len(fs)-limit)
 				break
 			}
-			if f.pos == (vec{-1, -1, -1}) {
+			if f.pos == noPos {
+				co.Findings = append(co.Findings, lintFinding{Message: f.msg})
 				fmt.Fprintf(&b, "  %s\n", f.msg)
 			} else {
+				pos := [3]int(f.pos)
+				co.Findings = append(co.Findings, lintFinding{Pos: &pos, Message: f.msg})
 				fmt.Fprintf(&b, "  %v %s\n", f.pos, f.msg)
 			}
 		}
+		out.Checks = append(out.Checks, co)
 	}
+	out.Findings, out.Clean = total, clean
 	head := fmt.Sprintf("Lint of %q: %d findings.", in.Name, total)
 	if len(clean) > 0 {
 		head += " No problems found by: " + strings.Join(clean, ", ") + "."
@@ -127,7 +134,7 @@ func (s *state) lint(in lintIn) (string, error) {
 	if total > 0 {
 		b.WriteString("\nThese checks use name-based rules of thumb (the server has no block registry), so treat them as things to look at, not certain errors.\n")
 	}
-	return head + "\n" + b.String(), nil
+	return head + "\n" + b.String(), out, nil
 }
 
 // noPos marks a finding about the whole structure.

@@ -102,8 +102,6 @@ func expandViews(in imageIn) ([]string, error) {
 // partial blocks (slabs, stairs, fences, panes, plants...) get their rough
 // shape, and glass and water are see-through.
 func (s *state) renderImage(_ context.Context, _ *mcp.CallToolRequest, in imageIn) (*mcp.CallToolResult, any, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	st, err := s.get(in.Name)
 	if err != nil {
 		return nil, nil, err
@@ -129,22 +127,13 @@ func (s *state) renderImage(_ context.Context, _ *mcp.CallToolRequest, in imageI
 	g := newGrid(st)
 	var content []mcp.Content
 	for _, v := range views {
-		var img *image.RGBA
-		if rot, ok := isoCorners[v]; ok {
-			img, err = renderIso(g, r, in.Scale, target, rot)
-		} else {
-			img, err = renderFlat(g, r, in.Scale, target, v)
-		}
+		data, w, h, err := renderPNG(g, r, in.Scale, target, v)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", v, err)
-		}
-		var buf bytes.Buffer
-		if err := png.Encode(&buf, img); err != nil {
 			return nil, nil, err
 		}
 		content = append(content,
-			&mcp.TextContent{Text: fmt.Sprintf("%s: %s, %dx%d pixels.", v, viewDescriptions[v], img.Bounds().Dx(), img.Bounds().Dy())},
-			&mcp.ImageContent{Data: buf.Bytes(), MIMEType: "image/png"})
+			&mcp.TextContent{Text: fmt.Sprintf("%s: %s, %dx%d pixels.", v, viewDescriptions[v], w, h)},
+			&mcp.ImageContent{Data: data, MIMEType: "image/png"})
 	}
 	note := fmt.Sprintf("Rendered %q, %s", in.Name, r)
 	if in.CutawayY != nil {
@@ -153,6 +142,25 @@ func (s *state) renderImage(_ context.Context, _ *mcp.CallToolRequest, in imageI
 	note += ". Colors approximate map colors, not textures; slabs, stairs, fences, panes, plants and other partial blocks are drawn with their rough shape, and glass, ice and water are see-through."
 	content = append(content, &mcp.TextContent{Text: note})
 	return &mcp.CallToolResult{Content: content}, nil, nil
+}
+
+// renderPNG draws one view of a region as a PNG and returns it with its
+// size in pixels.
+func renderPNG(g *grid, r box, scale, target int, view string) (data []byte, w, h int, err error) {
+	var img *image.RGBA
+	if rot, ok := isoCorners[view]; ok {
+		img, err = renderIso(g, r, scale, target, rot)
+	} else {
+		img, err = renderFlat(g, r, scale, target, view)
+	}
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("%s: %w", view, err)
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, 0, 0, err
+	}
+	return buf.Bytes(), img.Bounds().Dx(), img.Bounds().Dy(), nil
 }
 
 func pickScale(want, extent, target, maxScale int) int {

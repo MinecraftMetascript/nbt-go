@@ -4,7 +4,7 @@ An MCP server that lets an AI model build Minecraft Java Edition structure files
 
 The model works on structures held in memory. It places blocks with fills, shapes and text grids, looks at the result as text or rendered images, checks it with a linter and a style critique, and saves it as a file the game can load. It also understands jigsaw structures such as villages.
 
-Contents: [Install](#install) · [Add it to a client](#add-it-to-a-client) · [Use the files in a world](#use-the-files-in-a-world) · [Tools](#tools) · [Seeing the structure](#seeing-the-structure) · [Building guide and critique](#building-guide-and-critique) · [Jigsaw structures](#jigsaw-structures) · [Flags](#flags) · [Compatibility](#compatibility)
+Contents: [Install](#install) · [Add it to a client](#add-it-to-a-client) · [Use the files in a world](#use-the-files-in-a-world) · [Tools](#tools) · [Resources](#resources) · [Seeing the structure](#seeing-the-structure) · [Building guide and critique](#building-guide-and-critique) · [Jigsaw structures](#jigsaw-structures) · [Flags](#flags) · [Compatibility](#compatibility)
 
 ## Install
 
@@ -94,6 +94,7 @@ Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `str
 | `load_structure` | Open an existing `.nbt` file. |
 | `list_structures` | List the open structures. |
 | `save_structure` | Write a gzip-compressed `.nbt` file. |
+| `undo`, `redo` | Step back and forward through edits. See [Undo](#undo). |
 
 **Placing blocks**
 
@@ -168,6 +169,31 @@ Hollow shapes are watertight: every inside position is cut off from the outside 
 | `containers` | Chests, barrels and other containers with no loot table or items. |
 | `valuables` | High-value blocks such as gold, diamond and netherite blocks. |
 | `jigsaw` | Jigsaw block settings. |
+
+### Undo
+
+Every tool call that changes a structure is one step of history: a fill, a paste, a crop, creating or loading a structure. `undo` takes back the latest step, or several with `steps`, and `redo` puts them back until the next new edit. Files already saved are not touched.
+
+An edit that fails changes nothing, even if it had placed some blocks before running into the problem.
+
+The history keeps the last 100 steps, fewer when the structures are very large.
+
+### Structured results
+
+`describe_structure`, `lint_structure`, `critique_structure`, `diff_structures`, `undo` and `redo` return their result twice: as text for the model, and as structured content with a declared output schema for clients and scripts. A lint finding, for example, comes with its check, position and message as separate fields.
+
+## Resources
+
+Open structures are MCP resources, so a client can show a build, attach it to a conversation or download the file without a tool call.
+
+| URI | Content |
+| --- | --- |
+| `nbt-mcp://structure/{name}` | A text summary, the same as `describe_structure`. |
+| `nbt-mcp://structure/{name}/nbt` | The structure file, as `save_structure` would write it now. Over HTTP this is how a client gets the file. |
+| `nbt-mcp://structure/{name}/render/{view}` | A PNG of one view: `iso_se`, `iso_sw`, `iso_nw`, `iso_ne`, `top`, `bottom`, `south`, `north`, `east` or `west`. |
+| `nbt-mcp://guide/{topic}` | A section of the building guide. |
+
+The resource list follows the open structures (each lists its summary, file and `iso_se` image), and the server sends a list-changed notification when one opens or closes. Clients can subscribe to any structure URI, including views that aren't listed, and are notified when an edit changes that structure.
 
 ## Seeing the structure
 

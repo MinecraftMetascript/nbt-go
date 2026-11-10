@@ -25,6 +25,9 @@ const (
 	kindEdit
 	// kindWrite tools write files, replacing whatever is at the path.
 	kindWrite
+	// kindHistory tools (undo, redo) change structures in memory like
+	// edits, but manage the edit history themselves.
+	kindHistory
 )
 
 func (k toolKind) annotations(title string) *mcp.ToolAnnotations {
@@ -49,7 +52,13 @@ func (k toolKind) annotations(title string) *mcp.ToolAnnotations {
 // field has an `enum:"a,b,c"` tag. Calls are checked against a looser one
 // that leaves option values to the handler, which accepts a few aliases and
 // explains what is allowed, and null counts as leaving a field out.
-func addTool[In any](srv *mcp.Server, kind toolKind, name, title, description string, h mcp.ToolHandlerFor[In, any]) {
+//
+// If Out is a struct, the tool also declares it as its output schema and
+// returns it as structured content next to the text.
+//
+// The handler runs with the state locked. Edits are recorded so they can be
+// undone, and an edit that fails leaves the structures as they were.
+func addTool[In, Out any](srv *mcp.Server, s *state, kind toolKind, name, title, description string, h mcp.ToolHandlerFor[In, Out]) {
 	lenient, err := jsonschema.For[In](nil)
 	if err != nil {
 		panic(fmt.Sprintf("tool %s: %v", name, err))
@@ -58,20 +67,40 @@ func addTool[In any](srv *mcp.Server, kind toolKind, name, title, description st
 	if err != nil {
 		panic(fmt.Sprintf("tool %s: %v", name, err))
 	}
-	srv.AddTool(&mcp.Tool{
+	tool := &mcp.Tool{
 		Name:        name,
 		Title:       title,
 		Description: description,
-		InputSchema: clientSchema[In](),
+		InputSchema: inputSchema[In](),
 		Annotations: kind.annotations(title),
-	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		in, err := decodeArgs[In](resolved, req.Params.Arguments)
+	}
+	structured := reflect.TypeFor[Out]().Kind() == reflect.Struct
+	if structured {
+		tool.OutputSchema = clientSchema[Out]()
+	}
+	srv.AddTool(tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		in, args, err := decodeArgs[In](resolved, req.Params.Arguments)
 		if err != nil {
 			return toolError(err), nil
 		}
-		res, _, err := h(ctx, req, in)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		var before edit
+		if kind == kindEdit {
+			before = s.snapshot(name, args)
+		}
+		res, out, err := h(ctx, req, in)
 		if err != nil {
+			if kind == kindEdit {
+				s.restore(before)
+			}
 			return toolError(err), nil
+		}
+		if kind == kindEdit {
+			s.record(before)
+		}
+		if structured {
+			res.StructuredContent = out
 		}
 		return res, nil
 	})
@@ -85,38 +114,47 @@ func toolError(err error) *mcp.CallToolResult {
 	return res
 }
 
-func decodeArgs[In any](schema *jsonschema.Resolved, raw json.RawMessage) (In, error) {
+// decodeArgs checks a call's arguments and decodes them, also returning
+// them as a map.
+func decodeArgs[In any](schema *jsonschema.Resolved, raw json.RawMessage) (In, map[string]any, error) {
 	var in In
 	if len(raw) == 0 || string(raw) == "null" {
 		raw = json.RawMessage("{}")
 	}
 	var generic map[string]any
 	if err := json.Unmarshal(raw, &generic); err != nil {
-		return in, fmt.Errorf("arguments must be a JSON object: %w", err)
+		return in, nil, fmt.Errorf("arguments must be a JSON object: %w", err)
 	}
 	// Some clients send null for every optional field they leave out.
 	// Unmarshal already treats null as absent, so validation does too.
 	maps.DeleteFunc(generic, func(_ string, v any) bool { return v == nil })
 	if err := schema.Validate(generic); err != nil {
-		return in, fmt.Errorf("invalid arguments: %w", err)
+		return in, nil, fmt.Errorf("invalid arguments: %w", err)
 	}
 	if err := json.Unmarshal(raw, &in); err != nil {
-		return in, fmt.Errorf("invalid arguments: %w", err)
+		return in, nil, fmt.Errorf("invalid arguments: %w", err)
 	}
-	return in, nil
+	return in, generic, nil
 }
 
-// clientSchema is the input schema advertised for In.
-func clientSchema[In any]() *jsonschema.Schema {
-	s, err := jsonschema.For[In](nil)
+// inputSchema is the schema advertised for a tool's input. Most tools take
+// the structure to work on as "name" and leave it undescribed.
+func inputSchema[In any]() *jsonschema.Schema {
+	s := clientSchema[In]()
+	if p := s.Properties["name"]; p != nil && p.Description == "" {
+		p.Description = "name of the open structure"
+	}
+	return s
+}
+
+// clientSchema is the schema advertised for a tool's input or output type.
+func clientSchema[T any]() *jsonschema.Schema {
+	s, err := jsonschema.For[T](nil)
 	if err != nil {
 		panic(err)
 	}
 	simplify(s)
-	applyFieldTags(s, reflect.TypeFor[In]())
-	if p := s.Properties["name"]; p != nil && p.Description == "" {
-		p.Description = "name of the open structure"
-	}
+	applyFieldTags(s, reflect.TypeFor[T]())
 	return s
 }
 

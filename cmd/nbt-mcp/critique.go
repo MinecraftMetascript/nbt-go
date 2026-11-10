@@ -86,10 +86,10 @@ func project(g *grid, r box, side string) facade {
 	return f
 }
 
-func (s *state) critique(in critiqueIn) (string, error) {
+func (s *state) critique(in critiqueIn) (string, critiqueOut, error) {
 	st, err := s.get(in.Name)
 	if err != nil {
-		return "", err
+		return "", critiqueOut{}, err
 	}
 	style := in.Style
 	if style == "" {
@@ -97,14 +97,14 @@ func (s *state) critique(in critiqueIn) (string, error) {
 	}
 	t, ok := styles[style]
 	if !ok {
-		return "", fmt.Errorf("style %q must be survival or creative", in.Style)
+		return "", critiqueOut{}, fmt.Errorf("style %q must be survival or creative", in.Style)
 	}
 	r, err := regionOf(st, in.From, in.To)
 	if err != nil {
-		return "", err
+		return "", critiqueOut{}, err
 	}
 	if sz := r.size(); sz[0]*sz[1] > maxViewCells || sz[1]*sz[2] > maxViewCells || sz[0]*sz[2] > maxViewCells {
-		return "", fmt.Errorf("the region %s is too large to critique (max %d cells per side); limit it with from and to", r, maxViewCells)
+		return "", critiqueOut{}, fmt.Errorf("the region %s is too large to critique (max %d cells per side); limit it with from and to", r, maxViewCells)
 	}
 	limit := in.Limit
 	if limit <= 0 {
@@ -118,7 +118,7 @@ func (s *state) critique(in critiqueIn) (string, error) {
 	c.top = project(g, r, "top")
 	c.collectSurface()
 	if len(c.surface) == 0 {
-		return "", fmt.Errorf("there are no blocks to critique in %s", r)
+		return "", critiqueOut{}, fmt.Errorf("there are no blocks to critique in %s", r)
 	}
 
 	cats := []*category{c.depth(), c.palette(), c.detail(), c.silhouette(), c.overhang(), c.foundation(), c.openings(), c.symmetry()}
@@ -142,6 +142,13 @@ func (s *state) critique(in critiqueIn) (string, error) {
 	sort.SliceStable(ranked, func(i, j int) bool {
 		return (1-ranked[i].score)*ranked[i].weight > (1-ranked[j].score)*ranked[j].weight
 	})
+	out := critiqueOut{Style: style, Region: r.out(), Score: overall}
+	for _, cat := range ranked {
+		out.Categories = append(out.Categories, categoryOut{
+			Key: cat.key, Title: cat.title, Score: int(math.Round(cat.score * 100)), Weight: cat.weight,
+			Summary: cat.summary, Findings: cat.findings,
+		})
+	}
 	b.WriteString("\nFixes, most valuable first:\n")
 	listed := false
 	for _, cat := range ranked {
@@ -158,7 +165,7 @@ func (s *state) critique(in critiqueIn) (string, error) {
 		b.WriteString("  None. Judge the rest by eye with render_image.\n")
 	}
 	b.WriteString("\nThese are heuristics over what is visible from outside; a finding can be a deliberate choice. See building_guide for the techniques.\n")
-	return b.String(), nil
+	return b.String(), out, nil
 }
 
 type critic struct {
