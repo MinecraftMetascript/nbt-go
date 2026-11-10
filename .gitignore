@@ -1,0 +1,13 @@
+# Built binaries
+/cmd/nbt-mcp/nbt-mcp
+/cmd/nbt-mcp/nbt-mcp.exe
+/dist/
+
+# Test and tool output
+*.test
+*.out
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
