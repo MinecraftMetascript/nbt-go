@@ -217,7 +217,7 @@ func newServer(s *state) *mcp.Server {
 		handler(s.placeGrid))
 
 	addTool(srv, s, kindRead, "check_sealed", "Check a space is sealed",
-		"Check that a space is watertight: flood-fill from a position through everything that isn't a full block and report whether it reaches the outside, and where the likely gap is.",
+		"Check that a space is sealed off: flood-fill from a position and report whether it reaches the outside, and where the likely gap is. By default it checks against water, so slabs, stairs, fences and doors count as sealing; against=gaps counts any block that isn't full as open except closed doors, trapdoors and fence gates.",
 		handler(s.checkSealed))
 
 	addTool(srv, s, kindEdit, "transform_structure", "Rotate or mirror structure",
