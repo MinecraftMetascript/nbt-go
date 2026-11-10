@@ -130,3 +130,7 @@ Imports of `github.com/MinecraftMetascript/nbt-go` in `your-project` now resolve
 ## Scope
 
 This library covers Java Edition NBT (big-endian). Bedrock's little-endian and network variants, and region (`.mca`) files, aren't supported yet.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -18,7 +18,7 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 wi
   [ "$os" = windows ] && bin=nbt-mcp.exe
   CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
     -ldflags "-s -w -X main.buildVersion=$version" -o "$stage/$bin" .
-  cp README.md "$stage/"
+  cp README.md LICENSE "$stage/"
   if [ "$os" = windows ]; then
     (cd "$stage" && zip -q "$dist/$name.zip" ./*)
   else

@@ -169,3 +169,7 @@ The jigsaw tools follow the game's placement code (`JigsawPlacement`) for rigid 
 ## Using the files in a world
 
 Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `structures` before 1.21). Then load it with a structure block in Load mode, or run `/place template <namespace>:<name>`. Structure blocks can only load up to 48 blocks on each axis, but `/place template` has no such limit.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
