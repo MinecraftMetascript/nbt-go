@@ -19,6 +19,7 @@ var guideTopics = []struct{ name, file, title, about string }{
 	{"survival", "guide/survival.md", "Survival style", "practical builds a survival player could make: common materials, small palettes, functional detail"},
 	{"creative", "guide/creative.md", "Creative style", "showpiece builds: rich palettes, texture gradients, dense detail, complex shapes"},
 	{"jigsaw", "guide/jigsaw.md", "Jigsaw structures", "designing jigsaw structures that vary well: grid modules, connector naming, variants and slots, jitter with identical jigsaws, fallbacks and terminators, priorities, terrain blending, processors"},
+	{"module", "guide/module.md", "Building pieces to a module", "how to plan a multi-piece or multi-agent build with a one-page spec (module sizes, jigsaw names, materials, lighting, save paths) so pieces fit together the first time"},
 	{"palettes", "guide/palettes.md", "Style palettes", "block palettes per theme (medieval, castle, nordic, desert, swamp, ruined, nether), each in survival and creative versions"},
 }
 
@@ -39,7 +40,7 @@ func guideText(topic string) (string, error) {
 func guideURI(topic string) string { return "nbt-mcp://guide/" + topic }
 
 type guideIn struct {
-	Topics []string `json:"topics,omitempty" enum:"building,survival,creative,jigsaw,palettes" jsonschema:"sections to return: building, survival, creative, jigsaw, palettes (default building)"`
+	Topics []string `json:"topics,omitempty" enum:"building,survival,creative,jigsaw,module,palettes" jsonschema:"sections to return: building, survival, creative, jigsaw, module, palettes (default building)"`
 	Style  string   `json:"style,omitempty" enum:"survival,creative" jsonschema:"survival or creative: adds that style's section and the palettes"`
 }
 
@@ -140,10 +141,10 @@ func buildPrompt(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptRe
 	topics := []string{"building", style, "palettes"}
 	jigLine := ""
 	if jig {
-		topics = append(topics, "jigsaw")
+		topics = append(topics, "jigsaw", "module")
 		jigLine = `
 
-This is a jigsaw structure. Plan the module, the connector names, the pools and their fallbacks before building pieces; build each piece as its own structure, critique each piece, and preview the whole with assemble_jigsaw over at least five seeds. Follow the jigsaw section of the guide, including jitter with identical jigsaws.`
+This is a jigsaw structure. Before building any piece, write a one-page spec as the module section of the guide describes (module sizes, connector names, materials, lighting, save paths, pieces and owners), then build every piece to it; build each piece as its own structure, critique each piece, and preview the whole with assemble_jigsaw over at least five seeds. Follow the jigsaw section of the guide, including jitter with identical jigsaws.`
 	}
 	var guide []string
 	for _, t := range topics {

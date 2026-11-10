@@ -63,6 +63,10 @@ Processor lists (data/<ns>/worldgen/processor_list) apply random changes each ti
 
 assemble_jigsaw ignores processors and terrain, so check variety by assembling with several seeds and judge the aging in game.
 
+## Building many pieces, or with several agents
+
+Write a one-page spec before building pieces: the module, connector names, materials, lighting and save paths. The module section of this guide has a template for it, and the rules that keep pieces from several builders compatible.
+
 ## A checklist for a village-style structure
 
 1. Start piece: a plaza or crossroads, built on the module, with street jigsaws on each side at `placement_priority` 1.
