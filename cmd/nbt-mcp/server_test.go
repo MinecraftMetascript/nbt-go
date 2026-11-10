@@ -17,8 +17,13 @@ import (
 
 func connect(t *testing.T, dir string) *mcp.ClientSession {
 	t.Helper()
+	return connectState(t, newState(dir, defaultDataVersion))
+}
+
+func connectState(t *testing.T, s *state) *mcp.ClientSession {
+	t.Helper()
 	ctx := context.Background()
-	srv := newServer(newState(dir, defaultDataVersion))
+	srv := newServer(s)
 	ct, st := mcp.NewInMemoryTransports()
 	if _, err := srv.Connect(ctx, st, nil); err != nil {
 		t.Fatal(err)

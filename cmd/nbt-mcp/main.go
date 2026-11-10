@@ -13,6 +13,9 @@
 // and register it with an MCP client as a stdio server, for example:
 //
 //	claude mcp add minecraft -- nbt-mcp -dir ~/minecraft/structures
+//
+// With -http it serves Streamable HTTP instead, for clients that connect to
+// a URL, and only reads and writes files inside -dir.
 package main
 
 import (
@@ -36,9 +39,11 @@ const defaultDataVersion = 5023
 func main() {
 	dir := flag.String("dir", ".", "directory that relative save and load paths resolve against")
 	dataVersion := flag.Int("data-version", defaultDataVersion, "DataVersion for new structures (the Minecraft version they target; 4189 is 1.21.4, 5023 is 26.3)")
+	httpAddr := flag.String("http", "", "serve MCP over HTTP on this address (for example localhost:8765) instead of stdin/stdout; the endpoint is /mcp")
+	restrict := flag.Bool("restrict-paths", false, "only read and write files inside -dir (always on with -http)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [flags]\n\nRuns an MCP server on stdin/stdout for building Minecraft structure files.\n\nFlags:\n", os.Args[0])
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [flags]\n\nRuns an MCP server for building Minecraft structure files, on stdin/stdout or over HTTP with -http.\n\nSet "+tokenEnv+" to require that HTTP clients send it as a bearer token.\n\nFlags:\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -48,24 +53,29 @@ func main() {
 		return
 	}
 
-	if err := run(*dir, int32(*dataVersion)); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	st := newState(*dir, int32(*dataVersion))
+	st.restrict = *restrict || *httpAddr != ""
+	var err error
+	if *httpAddr != "" {
+		err = serveHTTP(ctx, st, *httpAddr, os.Getenv(tokenEnv))
+	} else {
+		err = newServer(st).Run(ctx, &mcp.StdioTransport{})
+	}
+	stopped := ctx.Err() != nil
+	stop()
+	if err != nil && !stopped {
 		log.Fatal(err)
 	}
 }
 
-// run serves MCP on stdin and stdout until the client disconnects or the
-// process is asked to stop.
-func run(dir string, dataVersion int32) error {
-	srv := newServer(newState(dir, dataVersion))
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
-		return err
-	}
-	return nil
-}
+// buildVersion is set by release builds with -ldflags "-X main.buildVersion=...".
+var buildVersion string
 
 func version() string {
+	if buildVersion != "" {
+		return buildVersion
+	}
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
 		return info.Main.Version
 	}

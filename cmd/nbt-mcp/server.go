@@ -34,6 +34,7 @@ Jigsaw structures: read building_guide with topics=["jigsaw"] for how to design 
 type state struct {
 	mu          sync.Mutex
 	dir         string
+	restrict    bool // only read and write files inside dir
 	dataVersion int32
 	structures  map[string]*structure.Structure
 }
@@ -77,7 +78,48 @@ func (s *state) resolve(path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(s.dir, path)
 	}
-	return filepath.Clean(path), nil
+	path = filepath.Clean(path)
+	if s.restrict {
+		if err := s.checkInside(path); err != nil {
+			return "", err
+		}
+	}
+	return path, nil
+}
+
+// checkInside reports an error unless path is inside the server's
+// directory, following symlinks in the part of it that already exists.
+func (s *state) checkInside(path string) error {
+	root, err := filepath.Abs(s.dir)
+	if err != nil {
+		return err
+	}
+	if root, err = filepath.EvalSymlinks(root); err != nil {
+		return err
+	}
+	if path, err = filepath.Abs(path); err != nil {
+		return err
+	}
+	// The file may not exist yet, so resolve the deepest ancestor that does.
+	existing, rest := path, ""
+	for {
+		real, err := filepath.EvalSymlinks(existing)
+		if err == nil {
+			existing = real
+			break
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return err
+		}
+		rest = filepath.Join(filepath.Base(existing), rest)
+		existing = parent
+	}
+	rel, err := filepath.Rel(root, filepath.Join(existing, rest))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("%s is outside %s, the only directory this server may read and write", path, root)
+	}
+	return nil
 }
 
 func text(format string, args ...any) *mcp.CallToolResult {
