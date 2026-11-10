@@ -135,8 +135,12 @@ type (
 	ByteArray []byte
 	// String is a TAG_String.
 	String string
-	// List is a TAG_List. All elements must have the same type. An empty
-	// List is written with element type TAG_End, as Minecraft does.
+	// List is a TAG_List. Its elements may mix types, as they may in
+	// Minecraft since 1.21.5 (["",{text:"a"}] in a text component): such a
+	// list is written as a list of compounds, each element that is not a
+	// compound wrapped as {"":element}, and wrapped elements are unwrapped
+	// when read. An empty List is written with element type TAG_End, as
+	// Minecraft does.
 	List []Tag
 	// Compound is a TAG_Compound: a set of uniquely named tags. Key order is
 	// not significant in NBT; SNBT output sorts keys.
@@ -173,10 +177,32 @@ func (Compound) isTag()  {}
 func (IntArray) isTag()  {}
 func (LongArray) isTag() {}
 
-// ElemType reports the type of the list's elements, or TagEnd if it is empty.
+// ElemType reports the type the list is written with: TagEnd if it is
+// empty, the type of its elements if they share one, and TagCompound if
+// they mix types (see [List]).
 func (l List) ElemType() TagType {
 	if len(l) == 0 {
 		return TagEnd
 	}
+	if l.Mixed() {
+		return TagCompound
+	}
 	return l[0].Type()
+}
+
+// Mixed reports whether the list's elements have more than one type, or
+// it holds a compound that would read back as a wrapped element.
+func (l List) Mixed() bool {
+	for _, e := range l {
+		if e == nil {
+			continue
+		}
+		if e.Type() != l[0].Type() {
+			return true
+		}
+		if c, ok := e.(Compound); ok && isWrapper(c) {
+			return true
+		}
+	}
+	return false
 }

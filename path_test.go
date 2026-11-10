@@ -96,6 +96,8 @@ func TestPathSet(t *testing.T) {
 		{`{a:[[1],[2]]}`, "a[1][0]", "5", "{a:[[1],[5]]}", 1},
 		{`{a:1}`, `{a:1}.b`, "2", "{a:1,b:2}", 1},
 		{`{a:1}`, `{a:2}.b`, "2", "{a:1}", 0},
+		{`{l:[1,2]}`, "l[0]", `"s"`, `{l:["s",2]}`, 1},
+		{`{l:[1]}`, `l[{a:1}]`, "{}", "{l:[1,{}]}", 1},
 	}
 	for _, tt := range tests {
 		root := mustSNBT(t, tt.root)
@@ -109,10 +111,8 @@ func TestPathSet(t *testing.T) {
 		}
 	}
 	for _, tt := range []struct{ root, path, value string }{
-		{`{l:[1,2]}`, "l[0]", `"s"`},
 		{`{arr:[I;1]}`, "arr[0]", "1b"},
 		{`{a:1}`, `{a:1}`, "2"},
-		{`{l:[1]}`, `l[{a:1}]`, "{}"},
 	} {
 		root := mustSNBT(t, tt.root)
 		if _, err := MustParsePath(tt.path).Set(root, mustSNBT(t, tt.value)); err == nil {

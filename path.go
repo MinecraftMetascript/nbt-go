@@ -247,8 +247,8 @@ func (p Path) Count(root Tag) int { return len(p.Get(root)) }
 // the end of a list creates nothing.
 //
 // root is changed in place, so it must be a [Compound] (or a path that
-// starts below its root); Set returns an error if a list or array would
-// end up holding mixed types.
+// starts below its root); Set returns an error if an array would end up
+// holding another type (an [IntArray] element set to a [Byte], say).
 func (p Path) Set(root Tag, v Tag) (int, error) {
 	if v == nil {
 		return 0, p.errorf("cannot set nil")
@@ -473,9 +473,6 @@ func (p Path) update(t Tag, i int, f func(old Tag) (Tag, int, error), create boo
 		if err != nil || nv == nil {
 			return t, 0, err
 		}
-		if len(l) > 0 && l[0].Type() != nv.Type() {
-			return t, 0, p.errorf("list holds %v, cannot add %v", l[0].Type(), nv.Type())
-		}
 		return append(l, nv), k, nil
 	}
 	return t, total, nil
@@ -529,11 +526,6 @@ func elemAt(t Tag, i int) Tag {
 func setElem(t Tag, i int, v Tag) (Tag, error) {
 	switch t := t.(type) {
 	case List:
-		for j, e := range t {
-			if j != i && e.Type() != v.Type() {
-				return t, fmt.Errorf("list holds %v, cannot set %v", e.Type(), v.Type())
-			}
-		}
 		t[i] = v
 		return t, nil
 	case ByteArray:

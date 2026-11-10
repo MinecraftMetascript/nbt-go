@@ -56,7 +56,8 @@ func TestSNBTParse(t *testing.T) {
 		{"[I;]", IntArray{}},
 		{"[L;1L,2]", LongArray{1, 2}},
 		{" { a : 1 , 'b c':{x:[{}]} } ", Compound{"a": Int(1), "b c": Compound{"x": List{Compound{}}}}},
-		{"[1,2b]", nil},
+		{"[1,2b]", List{Int(1), Byte(2)}},
+		{`["",{text:"a"}]`, List{String(""), Compound{"text": String("a")}}},
 		{"{a:1", nil},
 		{"{a:1}}", nil},
 		{`"unterminated`, nil},
@@ -153,5 +154,32 @@ func TestSNBTKeys(t *testing.T) {
 	back, err := ParseSNBT(want)
 	if err != nil || !Equal(back, c) {
 		t.Errorf("round trip: %v %v", back, err)
+	}
+}
+
+// A list that mixes types is stored the way Minecraft stores one: as a
+// list of compounds, wrapping each element that is not one.
+func TestMixedList(t *testing.T) {
+	l := List{String("a"), Compound{"text": String("b")}, Int(3), Compound{"": Int(4)}}
+	if !l.Mixed() || l.ElemType() != TagCompound {
+		t.Fatalf("Mixed() = %v, ElemType() = %v", l.Mixed(), l.ElemType())
+	}
+	data, err := Marshal(Compound{"l": l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tree Tag
+	if err := Unmarshal(data, &tree); err != nil {
+		t.Fatal(err)
+	}
+	if got := tree.(Compound)["l"]; !Equal(got, l) {
+		t.Errorf("round trip: %v, want %v", got, l)
+	}
+	// A list of one type is written as that type.
+	if (List{Int(1), Int(2)}).Mixed() || (List{}).Mixed() {
+		t.Error("a plain list is not mixed")
+	}
+	if !(List{Compound{"": Int(1)}}).Mixed() {
+		t.Error("a list holding a wrapper-shaped compound must be wrapped")
 	}
 }

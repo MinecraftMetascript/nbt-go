@@ -433,14 +433,9 @@ func (p *snbtParser) list() (Tag, error) {
 		return l, nil
 	}
 	for {
-		start := p.pos
 		v, err := p.value()
 		if err != nil {
 			return nil, err
-		}
-		if len(l) > 0 && v.Type() != l[0].Type() {
-			p.pos = start
-			return nil, p.errorf("list mixes %v and %v", l[0].Type(), v.Type())
 		}
 		l = append(l, v)
 		p.skipSpace()
