@@ -64,10 +64,10 @@ func TestListTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Each tool's own tests cover its behavior; this checks they're all registered.
-	want := []string{"add_entity", "create_structure", "describe_structure", "fill", "list_structures",
+	want := []string{"add_entity", "move_entity", "remove_entity", "create_structure", "describe_structure", "fill", "list_structures",
 		"load_structure", "remove_blocks", "render_layer", "save_structure", "set_blocks",
 		"place_jigsaw", "check_jigsaw_fit", "assemble_jigsaw",
-		"fill_ellipsoid", "fill_cylinder", "fill_tube", "decorate_surface", "place_grid", "check_sealed",
+		"fill_ellipsoid", "fill_cylinder", "fill_tube", "decorate_surface", "place_grid", "check_sealed", "check_lighting",
 		"transform_structure", "paste_structure", "crop_structure", "set_size",
 		"render_view", "render_image", "lint_structure", "diff_structures",
 		"critique_structure", "building_guide", "undo", "redo"}
@@ -307,4 +307,28 @@ func TestLenientArguments(t *testing.T) {
 		t.Errorf("bad option: got %q", msg)
 	}
 	call(t, cs, "list_structures", nil, false)
+}
+
+func TestSavePrunesPaletteAndFillRing(t *testing.T) {
+	dir := t.TempDir()
+	cs := connect(t, dir)
+	call(t, cs, "create_structure", map[string]any{"name": "p"}, false)
+	call(t, cs, "fill", map[string]any{"name": "p", "from": []int{0, 0, 0}, "to": []int{4, 0, 4}, "block": "dirt"}, false)
+	// A ring on a one-block-thick layer touches only the edge.
+	out := call(t, cs, "fill", map[string]any{"name": "p", "from": []int{0, 0, 0}, "to": []int{4, 0, 4}, "block": "stone", "mode": "ring"}, false)
+	wantContains(t, "fill", out, "Filled 16 positions")
+	call(t, cs, "fill", map[string]any{"name": "p", "from": []int{1, 0, 1}, "to": []int{3, 0, 3}, "block": "oak_planks"}, false)
+	// dirt is now unused; saving drops it.
+	out = call(t, cs, "save_structure", map[string]any{"name": "p", "path": "p.nbt"}, false)
+	wantContains(t, "save_structure", out, "Dropped 1 palette entries no block uses")
+	call(t, cs, "load_structure", map[string]any{"name": "q", "path": "p.nbt"}, false)
+	lint := call(t, cs, "lint_structure", map[string]any{"name": "q", "checks": []string{"format"}}, false)
+	wantContains(t, "lint_structure", lint, "0 findings")
+	desc := call(t, cs, "describe_structure", map[string]any{"name": "q"}, false)
+	wantContains(t, "describe_structure", desc, "16  minecraft:stone", "9  minecraft:oak_planks")
+	// Saving again has nothing to drop.
+	out = call(t, cs, "save_structure", map[string]any{"name": "q", "path": "q.nbt"}, false)
+	if strings.Contains(out, "Dropped") {
+		t.Errorf("nothing should be dropped:\n%s", out)
+	}
 }

@@ -193,7 +193,7 @@ func newServer(s *state) *mcp.Server {
 		handler(s.setBlocks))
 
 	addTool(srv, s, kindEdit, "fill", "Fill box",
-		"Fill a box with one block or a weighted mix, like the /fill command. Corners are inclusive. Mode \"replace\" fills the whole box, \"hollow\" fills the shell and puts air inside, and \"outline\" fills only the shell and leaves the inside unchanged.",
+		"Fill a box with one block or a weighted mix, like the /fill command. Corners are inclusive. Mode \"replace\" fills the whole box, \"hollow\" fills the shell and puts air inside, \"outline\" fills only the shell and leaves the inside unchanged, and \"ring\" fills only the four side walls (no floor or ceiling), which on a one-block-thick layer is just its edge.",
 		handler(s.fill))
 
 	addTool(srv, s, kindEdit, "fill_ellipsoid", "Fill sphere or ellipsoid",
@@ -220,6 +220,10 @@ func newServer(s *state) *mcp.Server {
 		"Check that a space is sealed off: flood-fill from a position and report whether it reaches the outside, and where the likely gap is. By default it checks against water, so slabs, stairs, fences and doors count as sealing; against=gaps counts any block that isn't full as open except closed doors, trapdoors and fence gates.",
 		handler(s.checkSealed))
 
+	addTool(srv, s, kindRead, "check_lighting", "Check lighting",
+		"Find floor positions where hostile mobs could spawn: block light 0 (as in Java 1.18 and later), a full block to stand on, and two blocks of room. Spreads light from torches, lanterns, glowstone and other sources through the structure, and lists the dark spots with a map of the worst layer. By default only roofed positions count.",
+		handler(s.checkLighting))
+
 	addTool(srv, s, kindEdit, "transform_structure", "Rotate or mirror structure",
 		"Rotate and/or mirror a whole structure in place, turning block states (facing, axis, connections, rails, stairs) and entities to match.",
 		handler(s.transformStructure))
@@ -241,8 +245,16 @@ func newServer(s *state) *mcp.Server {
 		handler(s.remove))
 
 	addTool(srv, s, kindEdit, "add_entity", "Add entity",
-		"Add an entity, such as an armor stand, villager or item frame.",
+		"Add an entity, such as an armor stand, villager or item frame. Warns if it would start inside a block's collision box (a villager at y = n.0 on a carpet sinks into it and is stuck): stand it on top, e.g. y = n.0625 on a carpet.",
 		handler(s.addEntity))
+
+	addTool(srv, s, kindEdit, "move_entity", "Move entity",
+		"Move an entity, picked by its number from describe_structure or by the position it's nearest. Updates every copy of its position (pos, blockPos and the Pos in its data) and warns if it would be stuck.",
+		handler(s.moveEntity))
+
+	addTool(srv, s, kindEdit, "remove_entity", "Remove entity",
+		"Remove an entity, picked by its number from describe_structure or by the position it's nearest. Later entities are renumbered.",
+		handler(s.removeEntity))
 
 	addTool(srv, s, kindRead, "describe_structure", "Describe structure",
 		"Summarize a structure: size, how much is blocks, air and empty space, block counts by type, entities, block entities, and its jigsaw blocks with warnings about likely mistakes.",
@@ -277,7 +289,7 @@ func newServer(s *state) *mcp.Server {
 		handler(s.checkFit))
 
 	addTool(srv, s, kindEdit, "assemble_jigsaw", "Assemble jigsaw structure",
-		"Assemble a jigsaw structure from a start piece and template pools, following the game's placement rules (attachment, priorities, depth, max distance, and the rule that pieces can't overlap), and open the result as a new structure to inspect with render_layer and describe_structure. Reports every piece placed and every jigsaw that placed nothing, with the reason. Pools come from a datapack folder or inline JSON; element locations can name open structures. Terrain, processors and terrain_matching projection are ignored.",
+		"Assemble a jigsaw structure from a start piece and template pools, following the game's placement rules (attachment, priorities, depth, max distance, and the rule that pieces can't overlap), and open the result as a new structure to inspect with render_layer and describe_structure. Reports every piece placed and every jigsaw that placed nothing, with the reason; above 40 pieces it gives a summary instead (counts per template, a depth histogram, problems grouped by reason). Entry jigsaws that point back at their parent are counted, not listed. Pass seeds to try several layouts and see which templates never get placed. Pools come from a datapack folder or inline JSON; element locations can name open structures. Terrain, processors and terrain_matching projection are ignored.",
 		handler(s.assemble))
 
 	addTool(srv, s, kindRead, "critique_structure", "Critique structure",
@@ -285,11 +297,11 @@ func newServer(s *state) *mcp.Server {
 		handlerOut(s.critique))
 
 	addTool(srv, s, kindHistory, "undo", "Undo edits",
-		"Undo the most recent edits, one tool call per step: a fill, a paste, a crop, creating or loading a structure, and so on. Files already saved are not changed. Use it to back out of a change that made the build worse instead of repairing it by hand.",
+		"Undo the most recent edits, one tool call per step: a fill, a paste, a crop, creating or loading a structure, and so on. Files already saved are not changed. Use it to back out of a change that made the build worse instead of repairing it by hand. With name, it undoes only edits to that structure; pass it whenever several agents share the server, so one agent's undo never reverts another's edit.",
 		handlerOut(s.undoEdits))
 
 	addTool(srv, s, kindHistory, "redo", "Redo edits",
-		"Redo edits that undo took back. A new edit after an undo clears what could be redone.",
+		"Redo edits that undo took back; name limits it to one structure. A new edit to a structure clears what could be redone on it.",
 		handlerOut(s.redoEdits))
 
 	addGuide(srv, s)
@@ -430,7 +442,7 @@ func (b boxIn) bounds() (lo, hi [3]int, err error) {
 type fillIn struct {
 	boxIn
 	Block string `json:"block" jsonschema:"block in command syntax, e.g. stone_bricks, or a weighted mix such as 70%stone_bricks,30%cracked_stone_bricks"`
-	Mode  string `json:"mode,omitempty" enum:"replace,hollow,outline" jsonschema:"replace (default), hollow, or outline"`
+	Mode  string `json:"mode,omitempty" enum:"replace,hollow,outline,ring" jsonschema:"replace (default), hollow, outline, or ring (only the four side walls of every layer, inside unchanged, so a one-block-thick layer gets just its edge)"`
 	Seed  *int64 `json:"seed,omitempty" jsonschema:"random seed for block mixes; a random one is used and reported if omitted"`
 }
 
@@ -452,15 +464,19 @@ func (s *state) fill(in fillIn) (string, error) {
 	if mode == "" {
 		mode = "replace"
 	}
-	if mode != "replace" && mode != "hollow" && mode != "outline" {
-		return "", fmt.Errorf("unknown mode %q; use replace, hollow or outline", in.Mode)
+	if mode != "replace" && mode != "hollow" && mode != "outline" && mode != "ring" {
+		return "", fmt.Errorf("unknown mode %q; use replace, hollow, outline or ring", in.Mode)
 	}
 	air := structure.BlockState{Name: "minecraft:air"}
 	n := 0
 	for x := lo[0]; x <= hi[0]; x++ {
 		for y := lo[1]; y <= hi[1]; y++ {
 			for z := lo[2]; z <= hi[2]; z++ {
-				edge := x == lo[0] || x == hi[0] || y == lo[1] || y == hi[1] || z == lo[2] || z == hi[2]
+				side := x == lo[0] || x == hi[0] || z == lo[2] || z == hi[2]
+				edge := side || y == lo[1] || y == hi[1]
+				if mode == "ring" && !side {
+					continue
+				}
 				place := pat.pick(rng)
 				if !edge {
 					switch mode {
@@ -541,7 +557,7 @@ func (s *state) addEntity(in entityIn) (string, error) {
 	if err := st.AddEntity(in.Pos, data); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Added %s at %v.", id, in.Pos), nil
+	return fmt.Sprintf("Added %s at %v as entity #%d.", id, in.Pos, len(st.Entities)-1) + stuckWarning(newGrid(st), in.Pos, id), nil
 }
 
 type nameIn struct {
@@ -606,10 +622,10 @@ func summarize(st *structure.Structure) (string, describeOut) {
 	}
 	if len(st.Entities) > 0 {
 		b.WriteString("\nEntities:\n")
-		for _, e := range st.Entities {
+		for i, e := range st.Entities {
 			id, _ := e.NBT["id"].(nbt.String)
 			out.Entities = append(out.Entities, entityOut{ID: string(id), Pos: e.Pos})
-			fmt.Fprintf(&b, "  %v at %v\n", e.NBT["id"], e.Pos)
+			fmt.Fprintf(&b, "  #%d %v at %v\n", i, e.NBT["id"], e.Pos)
 		}
 	}
 	jigsaws, js, warnings := jigsawReport(st)
@@ -704,6 +720,7 @@ func (s *state) save(in saveIn) (string, error) {
 	if filepath.Ext(path) != ".nbt" {
 		path += ".nbt"
 	}
+	st, pruned := pruneStates(st)
 	if err := st.Validate(); err != nil {
 		return "", err
 	}
@@ -726,8 +743,54 @@ func (s *state) save(in saveIn) (string, error) {
 		return "", err
 	}
 	note := ""
+	if pruned > 0 {
+		note += fmt.Sprintf("\nDropped %d palette entries no block uses.", pruned)
+	}
 	if st.Size[0] > 48 || st.Size[1] > 48 || st.Size[2] > 48 {
-		note = "\nNote: it is larger than 48 blocks on some axis, so a structure block cannot load all of it; use /place template instead."
+		note += "\nNote: it is larger than 48 blocks on some axis, so a structure block cannot load all of it; use /place template instead."
 	}
 	return fmt.Sprintf("Saved %q (%d x %d x %d, %d blocks) to %s.%s", in.Name, st.Size[0], st.Size[1], st.Size[2], len(st.Blocks), path, note), nil
+}
+
+// pruneStates returns st without palette entries that no block uses, which
+// replacing blocks leaves behind, and how many it dropped. st itself is not
+// changed. Structures with several palette variants are left alone, since
+// their entries are shared by every variant.
+func pruneStates(st *structure.Structure) (*structure.Structure, int) {
+	if len(st.Palettes) > 0 {
+		return st, 0
+	}
+	used := make([]bool, len(st.Palette))
+	for _, b := range st.Blocks {
+		if b.State >= 0 && int(b.State) < len(used) {
+			used[b.State] = true
+		}
+	}
+	unused := 0
+	for _, u := range used {
+		if !u {
+			unused++
+		}
+	}
+	if unused == 0 {
+		return st, 0
+	}
+	out := structure.New(st.DataVersion)
+	out.Size, out.Entities = st.Size, st.Entities
+	remap := make([]int32, len(st.Palette))
+	out.Palette = make([]structure.BlockState, 0, len(st.Palette)-unused)
+	for i, bs := range st.Palette {
+		if used[i] {
+			remap[i] = int32(len(out.Palette))
+			out.Palette = append(out.Palette, bs)
+		}
+	}
+	out.Blocks = make([]structure.Block, len(st.Blocks))
+	for i, b := range st.Blocks {
+		if b.State >= 0 && int(b.State) < len(remap) {
+			b.State = remap[b.State]
+		}
+		out.Blocks[i] = b
+	}
+	return out, unused
 }

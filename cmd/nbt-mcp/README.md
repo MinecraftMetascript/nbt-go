@@ -93,7 +93,7 @@ Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `str
 | `create_structure` | Start an empty structure in memory, optionally with a specific `data_version`. |
 | `load_structure` | Open an existing `.nbt` file. |
 | `list_structures` | List the open structures. |
-| `save_structure` | Write a gzip-compressed `.nbt` file. |
+| `save_structure` | Write a gzip-compressed `.nbt` file, dropping palette entries no block uses. |
 | `undo`, `redo` | Step back and forward through edits. See [Undo](#undo). |
 
 **Placing blocks**
@@ -101,14 +101,16 @@ Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `str
 | Tool | What it does |
 | --- | --- |
 | `set_blocks` | Place a batch of blocks, each with optional block entity SNBT (chest loot and so on). |
-| `fill` | Fill a box, like `/fill`, in `replace`, `hollow` or `outline` mode. |
+| `fill` | Fill a box, like `/fill`, in `replace`, `hollow`, `outline` or `ring` (side walls only) mode. |
 | `fill_ellipsoid` | A sphere or ellipsoid, solid or as a watertight shell. |
 | `fill_cylinder` | A cylinder along any axis: solid, shell, open tube or ring, or a disc. |
 | `fill_tube` | A rounded, optionally tapering tube along a path of points (trunks, roots, pipes). |
 | `place_grid` | Place many blocks from text layers and a legend, the inverse of `render_layer`. |
 | `decorate_surface` | Put a block on, or swap in for, the exposed faces of solid blocks (moss, snow, vines, grass). |
 | `remove_blocks` | Clear a box back to "no block", so placing the structure leaves the world unchanged there. |
-| `add_entity` | Add an entity with optional SNBT. |
+| `add_entity` | Add an entity with optional SNBT. Warns if it would start stuck inside a block. |
+| `move_entity` | Move an entity, keeping all its position fields in step. |
+| `remove_entity` | Remove an entity. |
 
 **Reshaping**
 
@@ -136,6 +138,7 @@ Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `str
 | `lint_structure` | Check for common mistakes. See [Lint checks](#lint-checks). |
 | `critique_structure` | Score how hand-crafted a build looks and list the fixes worth most. See [Building guide and critique](#building-guide-and-critique). |
 | `check_sealed` | Flood-fill from a point to check that a space is watertight, and find the gap if it isn't. Closed doors, trapdoors and slabs hold water; `against=gaps` checks for any non-full block except closed doors. |
+| `check_lighting` | Find roofed floor positions dark enough for hostile mobs to spawn, with a map of the worst layer. |
 | `building_guide` | The building guide: principles, survival and creative styles, jigsaw design, and palettes by theme. |
 
 **Jigsaw**
@@ -144,7 +147,7 @@ Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `str
 | --- | --- |
 | `place_jigsaw` | Place a jigsaw block with typed settings. `final_state` defaults to the block it replaces. |
 | `check_jigsaw_fit` | Check where a child piece lands on a parent's jigsaws in each rotation, and whether it fits. |
-| `assemble_jigsaw` | Assemble a whole jigsaw layout from a start piece and template pools, and open the result. |
+| `assemble_jigsaw` | Assemble a whole jigsaw layout from a start piece and template pools, and open the result. Large layouts get a summary; `seeds` reports which templates never get placed. |
 
 Blocks use command syntax (`oak_stairs[facing=east,half=bottom]`), and the `minecraft:` namespace is optional. Wherever a tool fills an area, the block can also be a weighted mix such as `70%stone_bricks,20%cracked_stone_bricks,10%mossy_stone_bricks` (`3*stone,1*andesite` works too). Every random tool takes a `seed` and reports the seed it used, so a result can be reproduced.
 
@@ -164,6 +167,7 @@ Hollow shapes are watertight: every inside position is cut off from the outside 
 | `gravity` | Sand, gravel, concrete powder and other falling blocks with nothing under them. |
 | `halves` | Doors, beds and tall plants missing their other half. |
 | `fire` | Fire and lava next to blocks that burn. |
+| `entities` | Entities that start inside a block's collision box, such as a villager sunk into a carpet. |
 | `unsupported` | Solid blocks with nothing anywhere below them, such as legs hanging past the edge of a plinth. |
 | `floating` | Groups of blocks that don't touch the bottom layer or anything connected to it. |
 | `containers` | Chests, barrels and other containers with no loot table or items. |
@@ -173,6 +177,8 @@ Hollow shapes are watertight: every inside position is cut off from the outside 
 ### Undo
 
 Every tool call that changes a structure is one step of history: a fill, a paste, a crop, creating or loading a structure. `undo` takes back the latest step, or several with `steps`, and `redo` puts them back until the next new edit. Files already saved are not touched.
+
+The history is shared by everything connected to the server. When several agents build at once, pass `name` to `undo` and `redo`: they then step through only that structure's edits, and a new edit only clears the redo steps of the structures it changes.
 
 An edit that fails changes nothing, even if it had placed some blocks before running into the problem.
 

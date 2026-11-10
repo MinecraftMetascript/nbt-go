@@ -20,6 +20,7 @@ var lintChecks = []struct{ name, about string }{
 	{"gravity", "sand, gravel, concrete powder and other falling blocks with nothing under them"},
 	{"halves", "doors, beds and tall plants missing their other half"},
 	{"fire", "fire and lava next to blocks that burn"},
+	{"entities", "mobs, armor stands and other entities that start inside a block's collision box and will be stuck"},
 	{"unsupported", "solid blocks with nothing anywhere below them, such as legs hanging past the edge of a plinth"},
 	{"floating", "groups of blocks that don't touch the bottom layer or anything connected to it"},
 	{"containers", "chests, barrels and other containers with no loot table or items"},
@@ -29,7 +30,7 @@ var lintChecks = []struct{ name, about string }{
 
 type lintIn struct {
 	Name   string   `json:"name"`
-	Checks []string `json:"checks,omitempty" enum:"format,renamed,newer,connections,support,gravity,halves,fire,unsupported,floating,containers,valuables,jigsaw" jsonschema:"which checks to run (default all): format, renamed, newer, connections, support, gravity, halves, fire, unsupported, floating, containers, valuables, jigsaw"`
+	Checks []string `json:"checks,omitempty" enum:"format,renamed,newer,connections,support,gravity,halves,fire,entities,unsupported,floating,containers,valuables,jigsaw" jsonschema:"which checks to run (default all): format, renamed, newer, connections, support, gravity, halves, fire, entities, unsupported, floating, containers, valuables, jigsaw"`
 	Limit  int      `json:"limit,omitempty" jsonschema:"most findings to list per check (default 10)"`
 }
 
@@ -90,7 +91,7 @@ func (s *state) lint(in lintIn) (string, lintOut, error) {
 	l := &linter{st: st, g: newGrid(st), out: map[string][]finding{}}
 	checks := map[string]func(){
 		"format": l.format, "renamed": l.renamed, "newer": l.newer, "connections": l.connections, "support": l.support,
-		"gravity": l.gravity, "halves": l.halves, "fire": l.fire,
+		"gravity": l.gravity, "halves": l.halves, "fire": l.fire, "entities": l.entities,
 		"unsupported": l.unsupported, "floating": l.floating, "containers": l.containers,
 		"valuables": l.valuables, "jigsaw": l.jigsaw,
 	}
@@ -177,7 +178,9 @@ func (l *linter) format() {
 		}
 	}
 	for i, n := range used {
-		if n == 0 {
+		// save_structure drops unused entries from a single palette, so
+		// only report them where they would be written.
+		if n == 0 && len(st.Palettes) > 0 {
 			l.add("format", noPos, "palette entry %d (%s) isn't used by any block", i, palette(st)[i])
 		}
 	}
@@ -321,7 +324,7 @@ func (l *linter) connections() {
 			}
 			has := v == "true" || v == "low" || v == "tall"
 			q := p.add(d.vec())
-			nb, _, exists := l.g.get(q)
+			nb, exists := l.placed(q)
 			switch {
 			case !exists && has:
 				wrong = append(wrong, fmt.Sprintf("%s=%s but there's no block to the %s (it depends on the world)", d, v, d))
@@ -434,7 +437,7 @@ func (l *linter) support() {
 	l.blocks(func(p vec, bs structure.BlockState, _ nbt.Compound) {
 		for _, d := range supportsNeeded(bs) {
 			q := p.add(d.vec())
-			nb, _, ok := l.g.get(q)
+			nb, ok := l.placed(q)
 			switch {
 			case !ok && q[1] < 0:
 				// Resting on whatever is below the structure is normal.
@@ -452,10 +455,27 @@ func (l *linter) support() {
 	})
 }
 
+// placed returns the block that ends up at p in the world: a jigsaw is
+// replaced by its final_state when the structure is placed.
+func (l *linter) placed(p vec) (structure.BlockState, bool) {
+	bs, data, ok := l.g.get(p)
+	if ok && bs.Name == jigsawBlock {
+		if fs, err := structure.ParseBlockState(parseJigsaw(p, bs, data).finalState); err == nil {
+			return fs, true
+		}
+	}
+	return bs, ok
+}
+
 // sturdyEnough allows a few common non-full supports.
 func sturdyEnough(bs, nb structure.BlockState) bool {
 	n := nb.Name
 	switch {
+	case strings.HasSuffix(bs.Name, "_pressure_plate"):
+		// Pressure plates only need the middle of the top face, which
+		// fences and walls have.
+		return strings.Contains(n, "fence") || strings.HasSuffix(n, "_wall") || strings.Contains(n, "slab") && nb.Properties["type"] != "bottom" ||
+			strings.Contains(n, "stairs") && nb.Properties["half"] == "top"
 	case strings.HasSuffix(bs.Name, "lantern") || strings.HasSuffix(bs.Name, "chain"):
 		return strings.Contains(n, "chain") || strings.Contains(n, "fence") || strings.HasSuffix(n, "_wall") || strings.Contains(n, "slab") || strings.Contains(n, "stairs") || strings.Contains(n, "lantern")
 	case strings.HasSuffix(bs.Name, "_carpet") || strings.HasPrefix(bs.Name, "minecraft:potted_") || bs.Name == "minecraft:flower_pot" || strings.HasSuffix(bs.Name, "candle"):
@@ -740,7 +760,7 @@ func (l *linter) gravity() {
 			return
 		}
 		q := p.add(down.vec())
-		nb, _, ok := l.g.get(q)
+		nb, ok := l.placed(q)
 		switch {
 		case !ok:
 			// Unchanged world positions are only a problem if nothing below

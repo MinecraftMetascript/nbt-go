@@ -125,11 +125,23 @@ func TestPlaceGrid(t *testing.T) {
 		"layers": [][]string{
 			{"###", "###"},
 			{"#D#", "# .", "#"},
-		}}, false)
+		}, "ragged": true}, false)
 	wantContains(t, "place_grid", out, "Placed 12 blocks from 2 layers", "[4 2 4]")
 	layer := call(t, cs, "render_layer", map[string]any{"name": "g", "y": 1}, false)
 	wantContains(t, "render_layer", layer, "   1 .#A#", "   2 .# .", "   3 .#..")
 	call(t, cs, "place_grid", map[string]any{"name": "g", "origin": []int{0, 0, 0}, "legend": map[string]string{}, "layers": [][]string{{"x"}}}, true)
+
+	// Without ragged, one row a character too long is refused.
+	out = call(t, cs, "place_grid", map[string]any{"name": "g", "origin": []int{0, 0, 0}, "legend": map[string]string{"#": "stone"},
+		"layers": [][]string{{"#######", "########"}}}, true)
+	wantContains(t, "place_grid", out, "layers[0][1] is 8 characters wide but layers[0][0] is 7")
+	out = call(t, cs, "place_grid", map[string]any{"name": "g", "origin": []int{0, 0, 0}, "legend": map[string]string{"#": "stone"},
+		"layers": [][]string{{"##", "##"}, {"##"}}}, true)
+	wantContains(t, "place_grid", out, "layers[1] has 1 rows but layers[0] has 2")
+	// Growing an existing structure is pointed out.
+	out = call(t, cs, "place_grid", map[string]any{"name": "g", "origin": []int{3, 0, 0}, "legend": map[string]string{"#": "stone"},
+		"layers": [][]string{{"##"}}}, false)
+	wantContains(t, "place_grid", out, "Size is now [5 2 4]. Note: the structure grew from [4 2 4]")
 }
 
 func TestDecorateSurface(t *testing.T) {
