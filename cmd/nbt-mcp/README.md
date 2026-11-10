@@ -138,6 +138,7 @@ Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `str
 | `lint_structure` | Check for common mistakes. See [Lint checks](#lint-checks). |
 | `critique_structure` | Score how hand-crafted a build looks and list the fixes worth most. See [Building guide and critique](#building-guide-and-critique). |
 | `check_sealed` | Flood-fill from a point to check that a space is watertight, and find the gap if it isn't. Closed doors, trapdoors and slabs hold water; `against=gaps` checks for any non-full block except closed doors. |
+| `check_lighting` | Find roofed floor positions dark enough for hostile mobs to spawn, with a map of the worst layer. |
 | `building_guide` | The building guide: principles, survival and creative styles, jigsaw design, and palettes by theme. |
 
 **Jigsaw**

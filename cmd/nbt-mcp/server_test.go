@@ -67,7 +67,7 @@ func TestListTools(t *testing.T) {
 	want := []string{"add_entity", "move_entity", "remove_entity", "create_structure", "describe_structure", "fill", "list_structures",
 		"load_structure", "remove_blocks", "render_layer", "save_structure", "set_blocks",
 		"place_jigsaw", "check_jigsaw_fit", "assemble_jigsaw",
-		"fill_ellipsoid", "fill_cylinder", "fill_tube", "decorate_surface", "place_grid", "check_sealed",
+		"fill_ellipsoid", "fill_cylinder", "fill_tube", "decorate_surface", "place_grid", "check_sealed", "check_lighting",
 		"transform_structure", "paste_structure", "crop_structure", "set_size",
 		"render_view", "render_image", "lint_structure", "diff_structures",
 		"critique_structure", "building_guide", "undo", "redo"}

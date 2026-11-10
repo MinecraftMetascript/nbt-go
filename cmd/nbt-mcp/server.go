@@ -220,6 +220,10 @@ func newServer(s *state) *mcp.Server {
 		"Check that a space is sealed off: flood-fill from a position and report whether it reaches the outside, and where the likely gap is. By default it checks against water, so slabs, stairs, fences and doors count as sealing; against=gaps counts any block that isn't full as open except closed doors, trapdoors and fence gates.",
 		handler(s.checkSealed))
 
+	addTool(srv, s, kindRead, "check_lighting", "Check lighting",
+		"Find floor positions where hostile mobs could spawn: block light 0 (as in Java 1.18 and later), a full block to stand on, and two blocks of room. Spreads light from torches, lanterns, glowstone and other sources through the structure, and lists the dark spots with a map of the worst layer. By default only roofed positions count.",
+		handler(s.checkLighting))
+
 	addTool(srv, s, kindEdit, "transform_structure", "Rotate or mirror structure",
 		"Rotate and/or mirror a whole structure in place, turning block states (facing, axis, connections, rails, stairs) and entities to match.",
 		handler(s.transformStructure))
