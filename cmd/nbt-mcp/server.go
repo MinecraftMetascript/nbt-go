@@ -229,7 +229,7 @@ func newServer(s *state) *mcp.Server {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "render_image",
-		Description: "Render the structure as a PNG image, isometric by default or from one side, with an approximate flat color per block type. Use it to judge overall shape and proportions; use render_view or render_layer for exact positions.",
+		Description: "Look at the structure: render PNG images from one or more viewpoints in a single call, so you can see it the way a player would. Views: isometric from each corner (iso_se, iso_sw, iso_nw, iso_ne), plan (top), elevations (south, north, east, west), or presets (corners, elevations, overview, all). Use cutaway_y to see inside a floor, and from/to to cut a cross-section. Partial blocks get their rough shape and glass and water are see-through; colors are approximate. Use render_view or render_layer for exact positions.",
 	}, s.renderImage)
 
 	mcp.AddTool(srv, &mcp.Tool{
