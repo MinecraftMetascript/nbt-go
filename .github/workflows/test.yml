@@ -48,7 +48,9 @@ jobs:
           go-version: stable
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.5.0
+          # The linter must be built with a Go at least as new as the one
+          # it checks with, so follow its releases along with Go's.
+          version: latest
           working-directory: ${{ matrix.dir }}
           args: --config=${{ github.workspace }}/.golangci.yml
 
