@@ -78,6 +78,20 @@ err := nbt.UnmarshalSNBT(`{Items:[{Slot:0b,id:"minecraft:diamond",count:3}]}`, &
 s, err := nbt.MarshalSNBT(chest)
 ```
 
+NBT paths, the `foo.bar[0]` syntax of `/data`, with the game's rules for
+matching, creating missing parents and "Nothing changed":
+
+```go
+root := nbt.Compound{}
+p := nbt.MustParsePath(`Items[{Slot:0b}].count`)
+n, err := p.Set(root, nbt.Int(5)) // creates Items:[{Slot:0b,count:5}]; n is 1
+tags := p.Get(root)               // [5]
+nbt.MustParsePath("Items[0]").Remove(root)
+```
+
+`nbt.Quote` quotes a string the way the game writes it in SNBT, and `Equal`,
+`Matches` and `Clone` compare and copy tag trees.
+
 ## Type mapping
 
 | Go                                       | NBT                                               |

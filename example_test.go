@@ -84,3 +84,20 @@ func ExampleParseSNBT() {
 	fmt.Println(chest.Items[0].ID, chest.Items[0].Count)
 	// Output: minecraft:diamond 3
 }
+
+func ExamplePath() {
+	root := nbt.Compound{}
+	p := nbt.MustParsePath(`Items[{Slot:0b}].count`)
+	n, err := p.Set(root, nbt.Int(5))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(n, root)
+	fmt.Println(p.Get(root))
+	nbt.MustParsePath("Items[0]").Remove(root)
+	fmt.Println(root)
+	// Output:
+	// 1 {Items:[{Slot:0b,count:5}]}
+	// [5]
+	// {Items:[]}
+}

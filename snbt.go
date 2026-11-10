@@ -155,8 +155,14 @@ func isUnquotedChar(c byte) bool {
 		c == '_' || c == '-' || c == '.' || c == '+'
 }
 
+// isUnquoted reports whether a compound key can be written bare. Like
+// Minecraft, it only leaves a key bare when it starts with a letter, '.'
+// or '_', so a key such as "1" or "-x" is quoted.
 func isUnquoted(s string) bool {
 	if s == "" {
+		return false
+	}
+	if c := s[0]; c >= '0' && c <= '9' || c == '-' || c == '+' {
 		return false
 	}
 	for i := 0; i < len(s); i++ {
@@ -167,22 +173,53 @@ func isUnquoted(s string) bool {
 	return true
 }
 
-// quoteSNBT quotes s, preferring double quotes but switching to single quotes
-// when that avoids escaping (common for JSON text components).
+// Quote returns s as a quoted SNBT string, the way Minecraft writes one.
+// The quote is '"' unless a quote character appears in s, in which case it
+// is the other kind from the first one found, so `say "hi"` becomes
+// 'say "hi"'. Backslashes, the chosen quote and control characters are
+// escaped (\n, \t, \x01, ...), so the result is always one line.
+func Quote(s string) string {
+	return quoteSNBT(s)
+}
+
 func quoteSNBT(s string) string {
-	q := byte('"')
-	if strings.IndexByte(s, '"') >= 0 && strings.IndexByte(s, '\'') < 0 {
-		q = '\''
+	var q byte
+	for i := 0; i < len(s) && q == 0; i++ {
+		switch s[i] {
+		case '"':
+			q = '\''
+		case '\'':
+			q = '"'
+		}
+	}
+	if q == 0 {
+		q = '"'
 	}
 	var b strings.Builder
 	b.Grow(len(s) + 2)
 	b.WriteByte(q)
 	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '\\' || c == q {
+		switch c := s[i]; {
+		case c == '\\' || c == q:
 			b.WriteByte('\\')
+			b.WriteByte(c)
+		case c == '\b':
+			b.WriteString(`\b`)
+		case c == '\t':
+			b.WriteString(`\t`)
+		case c == '\n':
+			b.WriteString(`\n`)
+		case c == '\f':
+			b.WriteString(`\f`)
+		case c == '\r':
+			b.WriteString(`\r`)
+		case c < ' ':
+			b.WriteString(`\x`)
+			b.WriteByte("0123456789ABCDEF"[c>>4])
+			b.WriteByte("0123456789ABCDEF"[c&15])
+		default:
+			b.WriteByte(c)
 		}
-		b.WriteByte(c)
 	}
 	b.WriteByte(q)
 	return b.String()
