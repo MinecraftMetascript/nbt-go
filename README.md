@@ -1,6 +1,14 @@
 # nbt-go
 
-A Go library for Minecraft's [NBT](https://minecraft.wiki/w/NBT_format) format, modeled on `encoding/json`.
+[![test](https://github.com/MinecraftMetascript/nbt-go/actions/workflows/test.yml/badge.svg)](https://github.com/MinecraftMetascript/nbt-go/actions/workflows/test.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/MinecraftMetascript/nbt-go.svg)](https://pkg.go.dev/github.com/MinecraftMetascript/nbt-go)
+
+Minecraft's [NBT](https://minecraft.wiki/w/NBT_format) format for Go, in two parts:
+
+- **A library** modeled on `encoding/json`, with a `structure` package for Java Edition structure (`.nbt`) files. It is documented below.
+- **[`nbt-mcp`](cmd/nbt-mcp)**, an MCP server built on the library that lets an AI model build, inspect and save structure files. It has [its own README](cmd/nbt-mcp/README.md).
+
+## Install
 
 ```sh
 go get github.com/MinecraftMetascript/nbt-go@latest
@@ -8,12 +16,13 @@ go get github.com/MinecraftMetascript/nbt-go@latest
 
 Requires Go 1.22 or newer. The library has no dependencies outside the standard library.
 
+## Features
+
 - `Marshal` / `Unmarshal`, `Encoder` / `Decoder`, and `nbt:"name,omitempty"` struct tags, the same way `encoding/json` does it.
 - A `Tag` tree (`Compound`, `List`, `Int`, …) for data whose shape you don't know ahead of time, like `map[string]any` for JSON.
 - Gzip and zlib compressed input is detected automatically, and `Encoder.SetCompression` writes it.
 - SNBT (the `{id:"minecraft:stone",count:1b}` syntax used in commands) both ways.
-- The `structure` package reads, writes and builds Java Edition structure (`.nbt`) files.
-- [`nbt-mcp`](cmd/nbt-mcp) is an MCP server built on it that lets a model build structure files: `go install github.com/MinecraftMetascript/nbt-go/cmd/nbt-mcp@latest`.
+- The `structure` package reads, writes and builds structure files.
 
 ## Usage
 
@@ -100,7 +109,7 @@ Decoding is lenient where it's safe: any integer tag decodes into any Go integer
 ## Structure files
 
 ```go
-s := structure.New(4189) // the DataVersion of the target Minecraft version
+s := structure.New(5023) // the DataVersion of the target Minecraft version; 5023 is 26.3
 
 s.Fill(0, 0, 0, 4, 0, 4, structure.MustParseBlockState("stone_bricks"))
 s.SetBlock(2, 1, 2, structure.MustParseBlockState("chest[facing=north]"),
@@ -114,18 +123,22 @@ err := s.Write(f) // gzip compressed, ready for a structure block or data pack
 
 `structure.Read` loads existing files, including vanilla ones with multiple palettes (shipwrecks and similar). Positions with no block are left alone when the structure is placed, like `minecraft:structure_void`; place `minecraft:air` to clear a space.
 
-Minecraft 26.3 (DataVersion 5009) renamed the palette keys from `Name`/`Properties` to `id`/`properties`. Both are read, and the structure is written with the keys that match its `DataVersion`.
+The `DataVersion` decides how the file is written. Minecraft 26.3 renamed the palette keys from `Name`/`Properties` to `id`/`properties` (from DataVersion 5009 on). Both are read, and a structure is written with the keys that match its `DataVersion`, so set it to the version of the game that will load the file. Newer games upgrade older files, but older games can't read newer ones.
 
-## Developing alongside another project
+## Development
 
-To use a local checkout from another module (for example the MCP server) without publishing, use a Go workspace in the parent directory:
+The repository holds two Go modules: the library at the root and the server in `cmd/nbt-mcp`, which pins a version of the library in its `go.mod`. Run the checks in each:
 
 ```sh
-git clone https://github.com/MinecraftMetascript/nbt-go
-go work init ./your-project ./nbt-go
+go test -race ./...
+golangci-lint run          # in cmd/nbt-mcp: golangci-lint run -c ../../.golangci.yml
 ```
 
-Imports of `github.com/MinecraftMetascript/nbt-go` in `your-project` now resolve to the local checkout. Don't commit `go.work`. To try an unmerged change without cloning it, run `go get github.com/MinecraftMetascript/nbt-go@<commit-sha>`. Branch names that contain a `/` can't be used as versions.
+To build the server against a local copy of the library, add a `go.work` file (it is not committed):
+
+```sh
+go work init . ./cmd/nbt-mcp
+```
 
 ## Scope
 
