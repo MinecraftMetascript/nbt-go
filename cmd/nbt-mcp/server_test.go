@@ -64,7 +64,7 @@ func TestListTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Each tool's own tests cover its behavior; this checks they're all registered.
-	want := []string{"add_entity", "create_structure", "describe_structure", "fill", "list_structures",
+	want := []string{"add_entity", "move_entity", "remove_entity", "create_structure", "describe_structure", "fill", "list_structures",
 		"load_structure", "remove_blocks", "render_layer", "save_structure", "set_blocks",
 		"place_jigsaw", "check_jigsaw_fit", "assemble_jigsaw",
 		"fill_ellipsoid", "fill_cylinder", "fill_tube", "decorate_surface", "place_grid", "check_sealed",

@@ -20,6 +20,7 @@ var lintChecks = []struct{ name, about string }{
 	{"gravity", "sand, gravel, concrete powder and other falling blocks with nothing under them"},
 	{"halves", "doors, beds and tall plants missing their other half"},
 	{"fire", "fire and lava next to blocks that burn"},
+	{"entities", "mobs, armor stands and other entities that start inside a block's collision box and will be stuck"},
 	{"unsupported", "solid blocks with nothing anywhere below them, such as legs hanging past the edge of a plinth"},
 	{"floating", "groups of blocks that don't touch the bottom layer or anything connected to it"},
 	{"containers", "chests, barrels and other containers with no loot table or items"},
@@ -29,7 +30,7 @@ var lintChecks = []struct{ name, about string }{
 
 type lintIn struct {
 	Name   string   `json:"name"`
-	Checks []string `json:"checks,omitempty" enum:"format,renamed,newer,connections,support,gravity,halves,fire,unsupported,floating,containers,valuables,jigsaw" jsonschema:"which checks to run (default all): format, renamed, newer, connections, support, gravity, halves, fire, unsupported, floating, containers, valuables, jigsaw"`
+	Checks []string `json:"checks,omitempty" enum:"format,renamed,newer,connections,support,gravity,halves,fire,entities,unsupported,floating,containers,valuables,jigsaw" jsonschema:"which checks to run (default all): format, renamed, newer, connections, support, gravity, halves, fire, entities, unsupported, floating, containers, valuables, jigsaw"`
 	Limit  int      `json:"limit,omitempty" jsonschema:"most findings to list per check (default 10)"`
 }
 
@@ -90,7 +91,7 @@ func (s *state) lint(in lintIn) (string, lintOut, error) {
 	l := &linter{st: st, g: newGrid(st), out: map[string][]finding{}}
 	checks := map[string]func(){
 		"format": l.format, "renamed": l.renamed, "newer": l.newer, "connections": l.connections, "support": l.support,
-		"gravity": l.gravity, "halves": l.halves, "fire": l.fire,
+		"gravity": l.gravity, "halves": l.halves, "fire": l.fire, "entities": l.entities,
 		"unsupported": l.unsupported, "floating": l.floating, "containers": l.containers,
 		"valuables": l.valuables, "jigsaw": l.jigsaw,
 	}

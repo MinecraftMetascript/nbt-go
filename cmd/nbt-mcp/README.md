@@ -108,7 +108,9 @@ Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `str
 | `place_grid` | Place many blocks from text layers and a legend, the inverse of `render_layer`. |
 | `decorate_surface` | Put a block on, or swap in for, the exposed faces of solid blocks (moss, snow, vines, grass). |
 | `remove_blocks` | Clear a box back to "no block", so placing the structure leaves the world unchanged there. |
-| `add_entity` | Add an entity with optional SNBT. |
+| `add_entity` | Add an entity with optional SNBT. Warns if it would start stuck inside a block. |
+| `move_entity` | Move an entity, keeping all its position fields in step. |
+| `remove_entity` | Remove an entity. |
 
 **Reshaping**
 
@@ -164,6 +166,7 @@ Hollow shapes are watertight: every inside position is cut off from the outside 
 | `gravity` | Sand, gravel, concrete powder and other falling blocks with nothing under them. |
 | `halves` | Doors, beds and tall plants missing their other half. |
 | `fire` | Fire and lava next to blocks that burn. |
+| `entities` | Entities that start inside a block's collision box, such as a villager sunk into a carpet. |
 | `unsupported` | Solid blocks with nothing anywhere below them, such as legs hanging past the edge of a plinth. |
 | `floating` | Groups of blocks that don't touch the bottom layer or anything connected to it. |
 | `containers` | Chests, barrels and other containers with no loot table or items. |

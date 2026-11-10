@@ -241,8 +241,16 @@ func newServer(s *state) *mcp.Server {
 		handler(s.remove))
 
 	addTool(srv, s, kindEdit, "add_entity", "Add entity",
-		"Add an entity, such as an armor stand, villager or item frame.",
+		"Add an entity, such as an armor stand, villager or item frame. Warns if it would start inside a block's collision box (a villager at y = n.0 on a carpet sinks into it and is stuck): stand it on top, e.g. y = n.0625 on a carpet.",
 		handler(s.addEntity))
+
+	addTool(srv, s, kindEdit, "move_entity", "Move entity",
+		"Move an entity, picked by its number from describe_structure or by the position it's nearest. Updates every copy of its position (pos, blockPos and the Pos in its data) and warns if it would be stuck.",
+		handler(s.moveEntity))
+
+	addTool(srv, s, kindEdit, "remove_entity", "Remove entity",
+		"Remove an entity, picked by its number from describe_structure or by the position it's nearest. Later entities are renumbered.",
+		handler(s.removeEntity))
 
 	addTool(srv, s, kindRead, "describe_structure", "Describe structure",
 		"Summarize a structure: size, how much is blocks, air and empty space, block counts by type, entities, block entities, and its jigsaw blocks with warnings about likely mistakes.",
@@ -541,7 +549,7 @@ func (s *state) addEntity(in entityIn) (string, error) {
 	if err := st.AddEntity(in.Pos, data); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Added %s at %v.", id, in.Pos), nil
+	return fmt.Sprintf("Added %s at %v as entity #%d.", id, in.Pos, len(st.Entities)-1) + stuckWarning(newGrid(st), in.Pos, id), nil
 }
 
 type nameIn struct {
@@ -606,10 +614,10 @@ func summarize(st *structure.Structure) (string, describeOut) {
 	}
 	if len(st.Entities) > 0 {
 		b.WriteString("\nEntities:\n")
-		for _, e := range st.Entities {
+		for i, e := range st.Entities {
 			id, _ := e.NBT["id"].(nbt.String)
 			out.Entities = append(out.Entities, entityOut{ID: string(id), Pos: e.Pos})
-			fmt.Fprintf(&b, "  %v at %v\n", e.NBT["id"], e.Pos)
+			fmt.Fprintf(&b, "  #%d %v at %v\n", i, e.NBT["id"], e.Pos)
 		}
 	}
 	jigsaws, js, warnings := jigsawReport(st)
