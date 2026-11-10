@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"syscall"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -47,12 +48,21 @@ func main() {
 		return
 	}
 
-	srv := newServer(newState(*dir, int32(*dataVersion)))
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
+	if err := run(*dir, int32(*dataVersion)); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// run serves MCP on stdin and stdout until the client disconnects or the
+// process is asked to stop.
+func run(dir string, dataVersion int32) error {
+	srv := newServer(newState(dir, dataVersion))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
+		return err
+	}
+	return nil
 }
 
 func version() string {

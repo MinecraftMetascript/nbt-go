@@ -58,7 +58,7 @@ func (r *reader) full(p []byte) error {
 
 func (r *reader) readN(n int) ([]byte, error) {
 	if err := r.full(r.buf[:n]); err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			err = io.ErrUnexpectedEOF
 		}
 		return nil, err
@@ -115,7 +115,7 @@ func (r *reader) bytes(n int) ([]byte, error) {
 	if n <= readChunk {
 		b := make([]byte, n)
 		if err := r.full(b); err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				err = io.ErrUnexpectedEOF
 			}
 			return nil, err
@@ -128,7 +128,7 @@ func (r *reader) bytes(n int) ([]byte, error) {
 		start := len(b)
 		b = append(b, make([]byte, k)...)
 		if err := r.full(b[start:]); err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				err = io.ErrUnexpectedEOF
 			}
 			return nil, err
@@ -332,7 +332,7 @@ func (w *writer) flush() error {
 
 func (w *writer) maybeFlush() {
 	if len(w.buf) >= flushAt {
-		w.flush()
+		_ = w.flush() // the error is kept in w.err
 	}
 }
 

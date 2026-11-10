@@ -154,7 +154,7 @@ type Everything struct {
 	Skip     string   `nbt:"-"`
 	Empty    string   `nbt:"empty,omitempty"`
 	Any      any      `nbt:"any"`
-	unexp    int
+	unexp    int      //nolint:unused // unexported fields must be skipped
 }
 
 func sampleEverything() Everything {
@@ -406,7 +406,7 @@ func TestCompression(t *testing.T) {
 			if dec.Compression() != c {
 				t.Errorf("detected %v", dec.Compression())
 			}
-			if err := dec.Decode(new(any)); err != io.EOF {
+			if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
 				t.Errorf("at end: got %v, want EOF", err)
 			}
 		})
@@ -416,8 +416,12 @@ func TestCompression(t *testing.T) {
 func TestUnmarshalGzip(t *testing.T) {
 	var buf bytes.Buffer
 	zw := gzip.NewWriter(&buf)
-	zw.Write(helloWorld)
-	zw.Close()
+	if _, err := zw.Write(helloWorld); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
 	var v struct {
 		Name string `nbt:"name"`
 	}

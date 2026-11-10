@@ -1,0 +1,31 @@
+# Shared by both modules: run `golangci-lint run` in the repo root for the
+# library and in cmd/nbt-mcp for the server.
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - misspell
+    - nilerr
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+  settings:
+    errcheck:
+      exclude-functions:
+        # Usage text and cleanup of files that were only read or are being
+        # abandoned: there is nothing useful to do with these errors.
+        - fmt.Fprintf
+        - (*os.File).Close
+        - os.Remove
+  exclusions:
+    presets:
+      - std-error-handling
+
+formatters:
+  enable:
+    - gofmt

@@ -277,11 +277,11 @@ func (p *snbtParser) quoted() (string, error) {
 	var b strings.Builder
 	for p.pos < len(p.s) {
 		c := p.s[p.pos]
-		switch {
-		case c == q:
+		switch c {
+		case q:
 			p.pos++
 			return b.String(), nil
-		case c == '\\':
+		case '\\':
 			p.pos++
 			if p.pos >= len(p.s) {
 				return "", p.errorf("unterminated escape")

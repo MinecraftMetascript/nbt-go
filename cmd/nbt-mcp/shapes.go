@@ -571,7 +571,7 @@ func (s *state) checkSealed(in sealedIn) (string, error) {
 			}
 			parent[q] = p
 			if !bounds.contains(q) {
-				return leakReport(st, g, parent, q, start), nil
+				return leakReport(g, parent, q, start), nil
 			}
 			if open(q) {
 				queue = append(queue, q)
@@ -581,7 +581,7 @@ func (s *state) checkSealed(in sealedIn) (string, error) {
 	return fmt.Sprintf("Sealed: the space at %v (%d positions) is closed off on all sides by full blocks.", start, len(parent)), nil
 }
 
-func leakReport(st *structure.Structure, g *grid, parent map[vec]vec, out, start vec) string {
+func leakReport(g *grid, parent map[vec]vec, out, start vec) string {
 	var path []vec
 	for p := parent[out]; ; p = parent[p] {
 		path = append(path, p)

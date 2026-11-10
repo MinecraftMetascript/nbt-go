@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/MinecraftMetascript/nbt-go/structure"
@@ -327,7 +328,9 @@ func shapeOf(bs structure.BlockState) []fbox {
 		return []fbox{fb(0, 0, 0, 1, 1.0/16, 1)}
 	case n == "snow":
 		layers := 1.0
-		fmt.Sscan(p["layers"], &layers)
+		if v, err := strconv.ParseFloat(p["layers"], 64); err == nil {
+			layers = v
+		}
 		return []fbox{fb(0, 0, 0, 1, layers/8, 1)}
 	case strings.HasSuffix(n, "_trapdoor"):
 		if p["open"] == "true" && hasFacing {
@@ -615,7 +618,7 @@ func forPolyPixels(img *image.RGBA, pts [][2]float64, f func(x, y int)) {
 					neg = true
 				}
 			}
-			if !(pos && neg) {
+			if !pos || !neg {
 				f(x, y)
 			}
 		}

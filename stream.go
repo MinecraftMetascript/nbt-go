@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"compress/gzip"
 	"compress/zlib"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -160,7 +161,7 @@ func (d *Decoder) DecodeTag() (Tag, error) {
 		return nil, err
 	}
 	name, t, err := (&reader{r: d.r}).readRoot()
-	if err == io.EOF && d.compression == Zlib {
+	if errors.Is(err, io.EOF) && d.compression == Zlib {
 		// zlib has no multi-stream framing, so a later Encode with zlib
 		// compression starts a fresh stream; look for one.
 		d.r = nil

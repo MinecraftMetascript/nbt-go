@@ -3,6 +3,7 @@ package nbt
 import (
 	"bytes"
 	"encoding"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -74,7 +75,7 @@ func (e *UnknownFieldError) Error() string {
 // the root tag. See the package documentation for the conversion rules.
 func Unmarshal(data []byte, v any) error {
 	err := NewDecoder(bytes.NewReader(data)).Decode(v)
-	if err == io.EOF {
+	if errors.Is(err, io.EOF) {
 		err = io.ErrUnexpectedEOF
 	}
 	return err

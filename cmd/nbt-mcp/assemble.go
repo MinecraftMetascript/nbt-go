@@ -247,7 +247,6 @@ func (a *assembler) expand(i int) []placed {
 		if j.pool == emptyID {
 			continue
 		}
-		j := j
 		fail := func(format string, args ...any) {
 			a.issues = append(a.issues, issue{piece: i, jigsaw: &j, msg: fmt.Sprintf(format, args...)})
 		}
@@ -471,11 +470,13 @@ func (a *assembler) pool(id string) (*templatePool, error) {
 		return p, nil
 	}
 	var p *templatePool
-	if ip, ok := a.inline[id]; ok {
+	ip, inline := a.inline[id]
+	switch {
+	case inline:
 		p = &ip
-	} else if id == emptyID {
+	case id == emptyID:
 		p = &templatePool{id: id}
-	} else if a.datapack != "" {
+	case a.datapack != "":
 		ns, path, _ := strings.Cut(id, ":")
 		file := filepath.Join(a.datapack, "data", ns, "worldgen", "template_pool", filepath.FromSlash(path)+".json")
 		data, err := os.ReadFile(file)
@@ -485,7 +486,7 @@ func (a *assembler) pool(id string) (*templatePool, error) {
 		if p, err = parsePool(id, data); err != nil {
 			return nil, fmt.Errorf("%s: %w", file, err)
 		}
-	} else {
+	default:
 		return nil, fmt.Errorf("template pool %s not found; pass it in pools or give a datapack", id)
 	}
 	a.pools[id] = p
