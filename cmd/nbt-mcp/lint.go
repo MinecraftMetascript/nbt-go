@@ -29,7 +29,7 @@ var lintChecks = []struct{ name, about string }{
 
 type lintIn struct {
 	Name   string   `json:"name"`
-	Checks []string `json:"checks,omitempty" jsonschema:"which checks to run (default all): format, renamed, newer, connections, support, gravity, halves, fire, unsupported, floating, containers, valuables, jigsaw"`
+	Checks []string `json:"checks,omitempty" enum:"format,renamed,newer,connections,support,gravity,halves,fire,unsupported,floating,containers,valuables,jigsaw" jsonschema:"which checks to run (default all): format, renamed, newer, connections, support, gravity, halves, fire, unsupported, floating, containers, valuables, jigsaw"`
 	Limit  int      `json:"limit,omitempty" jsonschema:"most findings to list per check (default 10)"`
 }
 

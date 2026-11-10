@@ -177,13 +177,13 @@ func jigsawNBT(j jigsaw) nbt.Compound {
 type jigsawIn struct {
 	Name              string `json:"name" jsonschema:"the structure to edit"`
 	Pos               [3]int `json:"pos" jsonschema:"position [x, y, z] of the jigsaw block"`
-	Facing            string `json:"facing" jsonschema:"direction the jigsaw's front points: up, down, north, south, east or west. The connecting piece is placed on this side, with its own jigsaw in the block directly in front of this one"`
-	Top               string `json:"top,omitempty" jsonschema:"for up or down jigsaws, which horizontal direction the top points (default north); must be up for horizontal ones. Only matters with an aligned joint"`
+	Facing            string `json:"facing" enum:"up,down,north,south,east,west" jsonschema:"direction the jigsaw's front points: up, down, north, south, east or west. The connecting piece is placed on this side, with its own jigsaw in the block directly in front of this one"`
+	Top               string `json:"top,omitempty" enum:"up,north,south,east,west" jsonschema:"for up or down jigsaws, which horizontal direction the top points (default north); must be up for horizontal ones. Only matters with an aligned joint"`
 	JigsawName        string `json:"jigsaw_name,omitempty" jsonschema:"this jigsaw's name, which other jigsaws target to attach to it (default minecraft:empty)"`
 	Target            string `json:"target,omitempty" jsonschema:"name of the jigsaw on the child piece to connect to (default minecraft:empty)"`
 	Pool              string `json:"pool,omitempty" jsonschema:"template pool to pick the child piece from, e.g. mypack:statues (default minecraft:empty, which means no child)"`
 	FinalState        string `json:"final_state,omitempty" jsonschema:"block that replaces the jigsaw once the structure generates. Defaults to the block already at pos (the one the jigsaw replaces), else the block below it, else air"`
-	Joint             string `json:"joint,omitempty" jsonschema:"rollable or aligned; only matters for up and down jigsaws (default rollable for them, aligned for horizontal ones)"`
+	Joint             string `json:"joint,omitempty" enum:"rollable,aligned" jsonschema:"rollable or aligned; only matters for up and down jigsaws (default rollable for them, aligned for horizontal ones)"`
 	PlacementPriority int    `json:"placement_priority,omitempty" jsonschema:"children of higher-priority jigsaws are processed first (default 0)"`
 	SelectionPriority int    `json:"selection_priority,omitempty" jsonschema:"this piece's jigsaws are tried in descending selection priority (default 0)"`
 }

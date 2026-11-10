@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"github.com/google/jsonschema-go/jsonschema"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -14,8 +17,13 @@ import (
 
 func connect(t *testing.T, dir string) *mcp.ClientSession {
 	t.Helper()
+	return connectState(t, newState(dir, defaultDataVersion))
+}
+
+func connectState(t *testing.T, s *state) *mcp.ClientSession {
+	t.Helper()
 	ctx := context.Background()
-	srv := newServer(newState(dir, defaultDataVersion))
+	srv := newServer(s)
 	ct, st := mcp.NewInMemoryTransports()
 	if _, err := srv.Connect(ctx, st, nil); err != nil {
 		t.Fatal(err)
@@ -25,7 +33,7 @@ func connect(t *testing.T, dir string) *mcp.ClientSession {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cs.Close() })
+	t.Cleanup(func() { _ = cs.Close() })
 	return cs
 }
 
@@ -181,4 +189,119 @@ func TestErrors(t *testing.T) {
 	call(t, cs, "render_layer", map[string]any{"name": "s", "y": 0}, true) // empty structure has no layers
 	call(t, cs, "add_entity", map[string]any{"name": "s", "pos": []float64{0, 0, 0}, "id": "pig", "nbt": "[1,2]"}, true)
 	call(t, cs, "load_structure", map[string]any{"name": "x", "path": "missing.nbt"}, true)
+}
+
+// TestToolSchemas checks that what tools/list advertises stays within the
+// plain subset of JSON Schema that clients other than Claude also accept,
+// and is fully described.
+func TestToolSchemas(t *testing.T) {
+	cs := connect(t, t.TempDir())
+	res, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var check func(path string, s map[string]any)
+	check = func(path string, s map[string]any) {
+		if _, union := s["type"].([]any); union {
+			t.Errorf("%s: type is a union %v; use a single type", path, s["type"])
+		}
+		for _, kw := range []string{"anyOf", "oneOf", "allOf", "$ref", "$defs"} {
+			if _, ok := s[kw]; ok {
+				t.Errorf("%s: uses %s, which some clients do not support", path, kw)
+			}
+		}
+		if items, ok := s["items"].(map[string]any); ok {
+			check(path+"[]", items)
+		}
+		props, _ := s["properties"].(map[string]any)
+		for name, p := range props {
+			check(path+"."+name, p.(map[string]any))
+		}
+	}
+	for _, tool := range res.Tools {
+		if tool.Title == "" || tool.Description == "" {
+			t.Errorf("%s: missing title or description", tool.Name)
+		}
+		if a := tool.Annotations; a == nil || a.OpenWorldHint == nil || a.DestructiveHint == nil {
+			t.Errorf("%s: missing annotations", tool.Name)
+		}
+		schema, ok := tool.InputSchema.(map[string]any)
+		if !ok || schema["type"] != "object" {
+			t.Fatalf("%s: input schema is %v", tool.Name, tool.InputSchema)
+		}
+		check(tool.Name, schema)
+		props, _ := schema["properties"].(map[string]any)
+		for name, p := range props {
+			if d, _ := p.(map[string]any)["description"].(string); d == "" {
+				t.Errorf("%s.%s has no description", tool.Name, name)
+			}
+		}
+	}
+}
+
+// TestSchemaEnums checks that the enum tags list exactly the values the
+// handlers know.
+func TestSchemaEnums(t *testing.T) {
+	enum := func(s *jsonschema.Schema, prop string) []string {
+		p := s.Properties[prop]
+		if p.Type == "array" {
+			p = p.Items
+		}
+		out := make([]string, len(p.Enum))
+		for i, v := range p.Enum {
+			out[i] = v.(string)
+		}
+		sort.Strings(out)
+		return out
+	}
+	same := func(what string, got, want []string) {
+		t.Helper()
+		want = slices.Sorted(slices.Values(want)) // a copy: some callers pass package tables
+		if !slices.Equal(got, want) {
+			t.Errorf("%s enum is %v, want %v", what, got, want)
+		}
+	}
+
+	var checks, topics, views []string
+	for _, c := range lintChecks {
+		checks = append(checks, c.name)
+	}
+	for _, g := range guideTopics {
+		topics = append(topics, g.name)
+	}
+	for v := range viewDescriptions {
+		views = append(views, v)
+	}
+	for v := range viewPresets {
+		views = append(views, v)
+	}
+	same("lint checks", enum(clientSchema[lintIn](), "checks"), checks)
+	same("guide topics", enum(clientSchema[guideIn](), "topics"), topics)
+	same("image views", enum(clientSchema[imageIn](), "views"), views)
+	same("image view", enum(clientSchema[imageIn](), "view"), views)
+	same("rotation", enum(clientSchema[transformIn](), "rotation"), rotationNames[:])
+	same("facing", enum(clientSchema[jigsawIn](), "facing"), dirNames[:])
+}
+
+// TestLenientArguments checks that calls stay forgiving even though the
+// advertised schema is strict: explicit nulls for optional fields, as some
+// clients send, and the aliases handlers accept.
+func TestLenientArguments(t *testing.T) {
+	cs := connect(t, t.TempDir())
+	call(t, cs, "create_structure", map[string]any{"name": "a", "data_version": nil}, false)
+	call(t, cs, "fill", map[string]any{"name": "a", "from": []int{0, 0, 0}, "to": []int{2, 0, 1}, "block": "stone", "mode": nil, "seed": nil}, false)
+	call(t, cs, "transform_structure", map[string]any{"name": "a", "rotation": "cw"}, false)
+	call(t, cs, "render_image", map[string]any{"name": "a", "views": nil, "view": "front", "from": nil, "cutaway_y": nil}, false)
+
+	// Mistakes are reported as tool errors the model can read.
+	if msg := call(t, cs, "fill", map[string]any{"name": "a", "from": []int{0, 0, 0}, "block": "stone"}, true); !strings.Contains(msg, "to") {
+		t.Errorf("missing field: got %q", msg)
+	}
+	if msg := call(t, cs, "fill", map[string]any{"name": "a", "from": []int{0, 0, 0}, "to": []int{1, 1, 1}, "block": "stone", "bogus": 1}, true); !strings.Contains(msg, "bogus") {
+		t.Errorf("unknown field: got %q", msg)
+	}
+	if msg := call(t, cs, "fill", map[string]any{"name": "a", "from": []int{0, 0, 0}, "to": []int{1, 1, 1}, "block": "stone", "mode": "sideways"}, true); !strings.Contains(msg, "hollow") {
+		t.Errorf("bad option: got %q", msg)
+	}
+	call(t, cs, "list_structures", nil, false)
 }

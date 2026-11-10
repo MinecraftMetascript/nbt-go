@@ -34,6 +34,7 @@ Jigsaw structures: read building_guide with topics=["jigsaw"] for how to design 
 type state struct {
 	mu          sync.Mutex
 	dir         string
+	restrict    bool // only read and write files inside dir
 	dataVersion int32
 	structures  map[string]*structure.Structure
 }
@@ -77,7 +78,48 @@ func (s *state) resolve(path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(s.dir, path)
 	}
-	return filepath.Clean(path), nil
+	path = filepath.Clean(path)
+	if s.restrict {
+		if err := s.checkInside(path); err != nil {
+			return "", err
+		}
+	}
+	return path, nil
+}
+
+// checkInside reports an error unless path is inside the server's
+// directory, following symlinks in the part of it that already exists.
+func (s *state) checkInside(path string) error {
+	root, err := filepath.Abs(s.dir)
+	if err != nil {
+		return err
+	}
+	if root, err = filepath.EvalSymlinks(root); err != nil {
+		return err
+	}
+	if path, err = filepath.Abs(path); err != nil {
+		return err
+	}
+	// The file may not exist yet, so resolve the deepest ancestor that does.
+	existing, rest := path, ""
+	for {
+		real, err := filepath.EvalSymlinks(existing)
+		if err == nil {
+			existing = real
+			break
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return err
+		}
+		rest = filepath.Join(filepath.Base(existing), rest)
+		existing = parent
+	}
+	rel, err := filepath.Rel(root, filepath.Join(existing, rest))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("%s is outside %s, the only directory this server may read and write", path, root)
+	}
+	return nil
 }
 
 func text(format string, args ...any) *mcp.CallToolResult {
@@ -117,147 +159,119 @@ func newServer(s *state) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "nbt-mcp", Title: "Minecraft structure builder", Version: version()},
 		&mcp.ServerOptions{Instructions: instructions})
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "create_structure",
-		Description: "Start a new, empty structure in memory. Replaces any open structure with the same name.",
-	}, handler(s, s.create))
+	addTool(srv, kindEdit, "create_structure", "Create structure",
+		"Start a new, empty structure in memory. Replaces any open structure with the same name.",
+		handler(s, s.create))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "load_structure",
-		Description: "Open an existing .nbt structure file for viewing or editing.",
-	}, handler(s, s.load))
+	addTool(srv, kindEdit, "load_structure", "Load structure file",
+		"Open an existing .nbt structure file for viewing or editing.",
+		handler(s, s.load))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "list_structures",
-		Description: "List the structures currently open in memory.",
-	}, handler(s, s.list))
+	addTool(srv, kindRead, "list_structures", "List open structures",
+		"List the structures currently open in memory.",
+		handler(s, s.list))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "set_blocks",
-		Description: "Place individual blocks, replacing whatever is at each position. Use this for details such as doors, stairs, chests and torches.",
-	}, handler(s, s.setBlocks))
+	addTool(srv, kindEdit, "set_blocks", "Set blocks",
+		"Place individual blocks, replacing whatever is at each position. Use this for details such as doors, stairs, chests and torches.",
+		handler(s, s.setBlocks))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "fill",
-		Description: "Fill a box with one block or a weighted mix, like the /fill command. Corners are inclusive. Mode \"replace\" fills the whole box, \"hollow\" fills the shell and puts air inside, and \"outline\" fills only the shell and leaves the inside unchanged.",
-	}, handler(s, s.fill))
+	addTool(srv, kindEdit, "fill", "Fill box",
+		"Fill a box with one block or a weighted mix, like the /fill command. Corners are inclusive. Mode \"replace\" fills the whole box, \"hollow\" fills the shell and puts air inside, and \"outline\" fills only the shell and leaves the inside unchanged.",
+		handler(s, s.fill))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "fill_ellipsoid",
-		Description: "Fill a sphere or ellipsoid, solid or as a watertight hollow shell. Good for domes, boulders, bushes, caves and organic bodies.",
-	}, handler(s, s.ellipsoid))
+	addTool(srv, kindEdit, "fill_ellipsoid", "Fill sphere or ellipsoid",
+		"Fill a sphere or ellipsoid, solid or as a watertight hollow shell. Good for domes, boulders, bushes, caves and organic bodies.",
+		handler(s, s.ellipsoid))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "fill_cylinder",
-		Description: "Fill a cylinder along x, y or z: solid, a hollow shell, a tube or ring (hollow with open_ends), or a disc (height 1). Cross-sections can be elliptical.",
-	}, handler(s, s.cylinder))
+	addTool(srv, kindEdit, "fill_cylinder", "Fill cylinder",
+		"Fill a cylinder along x, y or z: solid, a hollow shell, a tube or ring (hollow with open_ends), or a disc (height 1). Cross-sections can be elliptical.",
+		handler(s, s.cylinder))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "fill_tube",
-		Description: "Fill a rounded tube along a path of points, optionally tapering from one radius to another. Good for trunks, branches, roots, tentacles, pipes and curved tunnels.",
-	}, handler(s, s.tube))
+	addTool(srv, kindEdit, "fill_tube", "Fill tube along a path",
+		"Fill a rounded tube along a path of points, optionally tapering from one radius to another. Good for trunks, branches, roots, tentacles, pipes and curved tunnels.",
+		handler(s, s.tube))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "decorate_surface",
-		Description: "Apply a block to the exposed faces of solid blocks, like a decal: moss or snow on top surfaces, vines or glow lichen on walls, grass on the top of a mound. Can be limited to a box, to certain blocks, and to a random fraction of positions.",
-	}, handler(s, s.decorate))
+	addTool(srv, kindEdit, "decorate_surface", "Decorate surfaces",
+		"Apply a block to the exposed faces of solid blocks, like a decal: moss or snow on top surfaces, vines or glow lichen on walls, grass on the top of a mound. Can be limited to a box, to certain blocks, and to a random fraction of positions.",
+		handler(s, s.decorate))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "place_grid",
-		Description: "Place many blocks at once from text layers and a legend, in the same layout render_layer draws: each layer is a list of rows from north to south, each character one block going east. Much more compact than set_blocks for detailed builds.",
-	}, handler(s, s.placeGrid))
+	addTool(srv, kindEdit, "place_grid", "Place blocks from a text grid",
+		"Place many blocks at once from text layers and a legend, in the same layout render_layer draws: each layer is a list of rows from north to south, each character one block going east. Much more compact than set_blocks for detailed builds.",
+		handler(s, s.placeGrid))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "check_sealed",
-		Description: "Check that a space is watertight: flood-fill from a position through everything that isn't a full block and report whether it reaches the outside, and where the likely gap is.",
-	}, handler(s, s.checkSealed))
+	addTool(srv, kindRead, "check_sealed", "Check a space is sealed",
+		"Check that a space is watertight: flood-fill from a position through everything that isn't a full block and report whether it reaches the outside, and where the likely gap is.",
+		handler(s, s.checkSealed))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "transform_structure",
-		Description: "Rotate and/or mirror a whole structure in place, turning block states (facing, axis, connections, rails, stairs) and entities to match.",
-	}, handler(s, s.transformStructure))
+	addTool(srv, kindEdit, "transform_structure", "Rotate or mirror structure",
+		"Rotate and/or mirror a whole structure in place, turning block states (facing, axis, connections, rails, stairs) and entities to match.",
+		handler(s, s.transformStructure))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "paste_structure",
-		Description: "Copy one open structure into another at a position, optionally rotated or mirrored. Use it to merge parts built separately or repeat a module.",
-	}, handler(s, s.pasteStructure))
+	addTool(srv, kindEdit, "paste_structure", "Paste structure",
+		"Copy one open structure into another at a position, optionally rotated or mirrored. Use it to merge parts built separately or repeat a module.",
+		handler(s, s.pasteStructure))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "crop_structure",
-		Description: "Cut a structure down to a box (inclusive corners), moving that box to the origin. Optionally keep the original and open the cropped copy under a new name.",
-	}, handler(s, s.crop))
+	addTool(srv, kindEdit, "crop_structure", "Crop structure",
+		"Cut a structure down to a box (inclusive corners), moving that box to the origin. Optionally keep the original and open the cropped copy under a new name.",
+		handler(s, s.crop))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "set_size",
-		Description: "Set a structure's size explicitly, to add empty margin or trim it. Shrinking refuses to cut off blocks unless drop is set.",
-	}, handler(s, s.setSize))
+	addTool(srv, kindEdit, "set_size", "Set structure size",
+		"Set a structure's size explicitly, to add empty margin or trim it. Shrinking refuses to cut off blocks unless drop is set.",
+		handler(s, s.setSize))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "remove_blocks",
-		Description: "Remove blocks from a box (inclusive corners), so those positions are left unchanged when the structure is placed. This is not the same as placing air.",
-	}, handler(s, s.remove))
+	addTool(srv, kindEdit, "remove_blocks", "Remove blocks",
+		"Remove blocks from a box (inclusive corners), so those positions are left unchanged when the structure is placed. This is not the same as placing air.",
+		handler(s, s.remove))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "add_entity",
-		Description: "Add an entity, such as an armor stand, villager or item frame.",
-	}, handler(s, s.addEntity))
+	addTool(srv, kindEdit, "add_entity", "Add entity",
+		"Add an entity, such as an armor stand, villager or item frame.",
+		handler(s, s.addEntity))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "describe_structure",
-		Description: "Summarize a structure: size, how much is blocks, air and empty space, block counts by type, entities, block entities, and its jigsaw blocks with warnings about likely mistakes.",
-	}, handler(s, s.describe))
+	addTool(srv, kindRead, "describe_structure", "Describe structure",
+		"Summarize a structure: size, how much is blocks, air and empty space, block counts by type, entities, block entities, and its jigsaw blocks with warnings about likely mistakes.",
+		handler(s, s.describe))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "render_layer",
-		Description: "Draw one horizontal layer (a fixed y) as a top-down text grid, one character per block, with a legend. Rows are z (north at the top), columns are x (west on the left). Use it to check your work.",
-	}, handler(s, s.render))
+	addTool(srv, kindRead, "render_layer", "Render layer as text",
+		"Draw one horizontal layer (a fixed y) as a top-down text grid, one character per block, with a legend. Rows are z (north at the top), columns are x (west on the left). Use it to check your work.",
+		handler(s, s.render))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "diff_structures",
-		Description: "Compare two open structures (for example a file loaded before and after edits): size and DataVersion changes, how many positions differ, a count of each kind of change (stone → air), and the individual changes.",
-	}, handler(s, s.diffStructures))
+	addTool(srv, kindRead, "diff_structures", "Compare structures",
+		"Compare two open structures (for example a file loaded before and after edits): size and DataVersion changes, how many positions differ, a count of each kind of change (stone → air), and the individual changes.",
+		handler(s, s.diffStructures))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "lint_structure",
-		Description: "Check a structure for common mistakes: file format problems, block ids renamed between versions, walls and fences that don't connect, torches, lanterns and vines with nothing to attach to, sand and gravel over air, doors, beds and tall plants missing their other half, fire or lava next to flammable blocks, blocks with nothing below them (legs hanging off a plinth), floating groups, containers with no loot table, high-value blocks players could mine, and jigsaw settings. Run it before saving.",
-	}, handler(s, s.lint))
+	addTool(srv, kindRead, "lint_structure", "Lint structure",
+		"Check a structure for common mistakes: file format problems, block ids renamed between versions, walls and fences that don't connect, torches, lanterns and vines with nothing to attach to, sand and gravel over air, doors, beds and tall plants missing their other half, fire or lava next to flammable blocks, blocks with nothing below them (legs hanging off a plinth), floating groups, containers with no loot table, high-value blocks players could mine, and jigsaw settings. Run it before saving.",
+		handler(s, s.lint))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "render_view",
-		Description: "Draw the structure as seen from one side (top, bottom, north, south, east or west) as a text grid with a legend, showing the first non-air block along each line of sight. Use south for a front elevation, east or west for a side elevation, top for a plan. show=depth draws how far in each block is instead.",
-	}, handler(s, s.view))
+	addTool(srv, kindRead, "render_view", "Render view as text",
+		"Draw the structure as seen from one side (top, bottom, north, south, east or west) as a text grid with a legend, showing the first non-air block along each line of sight. Use south for a front elevation, east or west for a side elevation, top for a plan. show=depth draws how far in each block is instead.",
+		handler(s, s.view))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "render_image",
-		Description: "Look at the structure: render PNG images from one or more viewpoints in a single call, so you can see it the way a player would. Views: isometric from each corner (iso_se, iso_sw, iso_nw, iso_ne), plan (top), elevations (south, north, east, west), or presets (corners, elevations, overview, all). Use cutaway_y to see inside a floor, and from/to to cut a cross-section. Partial blocks get their rough shape and glass and water are see-through; colors are approximate. Use render_view or render_layer for exact positions.",
-	}, s.renderImage)
+	addTool(srv, kindRead, "render_image", "Render images",
+		"Look at the structure: render PNG images from one or more viewpoints in a single call, so you can see it the way a player would. Views: isometric from each corner (iso_se, iso_sw, iso_nw, iso_ne), plan (top), elevations (south, north, east, west), or presets (corners, elevations, overview, all). Use cutaway_y to see inside a floor, and from/to to cut a cross-section. Partial blocks get their rough shape and glass and water are see-through; colors are approximate. Use render_view or render_layer for exact positions.",
+		s.renderImage)
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "place_jigsaw",
-		Description: "Place a jigsaw block with its settings (name, target, pool, final_state, joint, priorities) and the right orientation. final_state defaults to the block the jigsaw replaces, so it doesn't leave a hole when the structure generates. Reports where the child piece will attach and any problems.",
-	}, handler(s, s.placeJigsaw))
+	addTool(srv, kindEdit, "place_jigsaw", "Place jigsaw block",
+		"Place a jigsaw block with its settings (name, target, pool, final_state, joint, priorities) and the right orientation. final_state defaults to the block the jigsaw replaces, so it doesn't leave a hole when the structure generates. Reports where the child piece will attach and any problems.",
+		handler(s, s.placeJigsaw))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "check_jigsaw_fit",
-		Description: "Check whether a child piece can attach to a parent piece's jigsaws: for each matching jigsaw and rotation, where the child would end up in the parent's coordinates and whether it fits. A child attached by a jigsaw that faces into the parent's bounding box must fit entirely inside that box, or the game silently places nothing.",
-	}, handler(s, s.checkFit))
+	addTool(srv, kindRead, "check_jigsaw_fit", "Check jigsaw fit",
+		"Check whether a child piece can attach to a parent piece's jigsaws: for each matching jigsaw and rotation, where the child would end up in the parent's coordinates and whether it fits. A child attached by a jigsaw that faces into the parent's bounding box must fit entirely inside that box, or the game silently places nothing.",
+		handler(s, s.checkFit))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "assemble_jigsaw",
-		Description: "Assemble a jigsaw structure from a start piece and template pools, following the game's placement rules (attachment, priorities, depth, max distance, and the rule that pieces can't overlap), and open the result as a new structure to inspect with render_layer and describe_structure. Reports every piece placed and every jigsaw that placed nothing, with the reason. Pools come from a datapack folder or inline JSON; element locations can name open structures. Terrain, processors and terrain_matching projection are ignored.",
-	}, handler(s, s.assemble))
+	addTool(srv, kindEdit, "assemble_jigsaw", "Assemble jigsaw structure",
+		"Assemble a jigsaw structure from a start piece and template pools, following the game's placement rules (attachment, priorities, depth, max distance, and the rule that pieces can't overlap), and open the result as a new structure to inspect with render_layer and describe_structure. Reports every piece placed and every jigsaw that placed nothing, with the reason. Pools come from a datapack folder or inline JSON; element locations can name open structures. Terrain, processors and terrain_matching projection are ignored.",
+		handler(s, s.assemble))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "critique_structure",
-		Description: "Score how hand-crafted a build looks, in survival or creative style, and list the most valuable fixes with coordinates: flat walls (depth), palette variety, share of detail blocks, silhouette, roof overhangs, foundation and colour gradient, windows and doors, asymmetry, and for survival style, lavish materials. Run it after blocking out and again after detailing; lint_structure checks correctness instead.",
-	}, handler(s, s.critique))
+	addTool(srv, kindRead, "critique_structure", "Critique structure",
+		"Score how hand-crafted a build looks, in survival or creative style, and list the most valuable fixes with coordinates: flat walls (depth), palette variety, share of detail blocks, silhouette, roof overhangs, foundation and colour gradient, windows and doors, asymmetry, and for survival style, lavish materials. Run it after blocking out and again after detailing; lint_structure checks correctness instead.",
+		handler(s, s.critique))
 
 	addGuide(srv, s)
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "save_structure",
-		Description: "Write a structure to a gzip-compressed .nbt file. To use it in a world, save to <world>/generated/<namespace>/structure/<name>.nbt (\"structures\" before 1.21) and load it with a structure block or /place template <namespace>:<name>.",
-	}, handler(s, s.save))
+	addTool(srv, kindWrite, "save_structure", "Save structure file",
+		"Write a structure to a gzip-compressed .nbt file. To use it in a world, save to <world>/generated/<namespace>/structure/<name>.nbt (\"structures\" before 1.21) and load it with a structure block or /place template <namespace>:<name>.",
+		handler(s, s.save))
 
 	return srv
 }
@@ -390,7 +404,7 @@ func (b boxIn) bounds() (lo, hi [3]int, err error) {
 type fillIn struct {
 	boxIn
 	Block string `json:"block" jsonschema:"block in command syntax, e.g. stone_bricks, or a weighted mix such as 70%stone_bricks,30%cracked_stone_bricks"`
-	Mode  string `json:"mode,omitempty" jsonschema:"replace (default), hollow, or outline"`
+	Mode  string `json:"mode,omitempty" enum:"replace,hollow,outline" jsonschema:"replace (default), hollow, or outline"`
 	Seed  *int64 `json:"seed,omitempty" jsonschema:"random seed for block mixes; a random one is used and reported if omitted"`
 }
 

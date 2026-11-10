@@ -261,8 +261,8 @@ func paste(dst, src *structure.Structure, t transform, at vec, o pasteOpts) (int
 
 type transformIn struct {
 	Name     string `json:"name"`
-	Rotation string `json:"rotation,omitempty" jsonschema:"clockwise rotation seen from above: none, clockwise_90, 180 or counterclockwise_90"`
-	Mirror   string `json:"mirror,omitempty" jsonschema:"none, x (swap east and west) or z (swap north and south); applied before the rotation"`
+	Rotation string `json:"rotation,omitempty" enum:"none,clockwise_90,180,counterclockwise_90" jsonschema:"clockwise rotation seen from above: none, clockwise_90, 180 or counterclockwise_90"`
+	Mirror   string `json:"mirror,omitempty" enum:"none,x,z" jsonschema:"none, x (swap east and west) or z (swap north and south); applied before the rotation"`
 }
 
 func (s *state) transformStructure(in transformIn) (string, error) {
@@ -301,8 +301,8 @@ type pasteIn struct {
 	Source       string `json:"source" jsonschema:"the open structure to copy from"`
 	Target       string `json:"target" jsonschema:"the open structure to copy into (it may be new and empty)"`
 	At           [3]int `json:"at" jsonschema:"where the lowest corner of the (rotated) source goes in the target [x, y, z]"`
-	Rotation     string `json:"rotation,omitempty" jsonschema:"rotate the source first: none, clockwise_90, 180 or counterclockwise_90"`
-	Mirror       string `json:"mirror,omitempty" jsonschema:"mirror the source first: none, x or z"`
+	Rotation     string `json:"rotation,omitempty" enum:"none,clockwise_90,180,counterclockwise_90" jsonschema:"rotate the source first: none, clockwise_90, 180 or counterclockwise_90"`
+	Mirror       string `json:"mirror,omitempty" enum:"none,x,z" jsonschema:"mirror the source first: none, x or z"`
 	SkipAir      bool   `json:"skip_air,omitempty" jsonschema:"don't copy the source's air blocks, so they don't overwrite the target"`
 	KeepExisting bool   `json:"keep_existing,omitempty" jsonschema:"only fill positions where the target has no block yet"`
 }

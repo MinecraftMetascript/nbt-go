@@ -16,10 +16,10 @@ const maxViewCells = 160 * 160
 
 type viewIn struct {
 	Name string  `json:"name"`
-	View string  `json:"view" jsonschema:"top, bottom, north, south, east or west: the side you look from. south is the front view (looking north, east on the right); top matches render_layer"`
+	View string  `json:"view" enum:"top,bottom,north,south,east,west" jsonschema:"top, bottom, north, south, east or west: the side you look from. south is the front view (looking north, east on the right); top matches render_layer"`
 	From *[3]int `json:"from,omitempty" jsonschema:"limit the view to a box: first corner [x, y, z]"`
 	To   *[3]int `json:"to,omitempty" jsonschema:"limit the view to a box: opposite corner [x, y, z], inclusive"`
-	Show string  `json:"show,omitempty" jsonschema:"blocks (default) draws the first block seen; depth draws how far in it is (0-9, then a-z), to tell near from far"`
+	Show string  `json:"show,omitempty" enum:"blocks,depth" jsonschema:"blocks (default) draws the first block seen; depth draws how far in it is (0-9, then a-z), to tell near from far"`
 }
 
 // viewAxes describes a view: which axes become columns and rows, which way

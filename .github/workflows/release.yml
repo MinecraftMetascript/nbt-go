@@ -1,0 +1,30 @@
+name: release
+
+# Pushing a tag such as cmd/nbt-mcp/v0.1.0 builds nbt-mcp for macOS, Linux
+# and Windows and publishes the archives as a GitHub release.
+on:
+  push:
+    tags: ["cmd/nbt-mcp/v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cmd/nbt-mcp/go.mod
+      - run: go test ./...
+        working-directory: cmd/nbt-mcp
+      - name: Build
+        run: scripts/build-release.sh "${GITHUB_REF_NAME#cmd/nbt-mcp/}"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#cmd/nbt-mcp/}
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "nbt-mcp $version" --generate-notes

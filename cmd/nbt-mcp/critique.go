@@ -15,7 +15,7 @@ import (
 
 type critiqueIn struct {
 	Name  string  `json:"name"`
-	Style string  `json:"style,omitempty" jsonschema:"survival (practical, common materials, lighter detail) or creative (showpiece, rich palette, dense detail); default creative"`
+	Style string  `json:"style,omitempty" enum:"survival,creative" jsonschema:"survival (practical, common materials, lighter detail) or creative (showpiece, rich palette, dense detail); default creative"`
 	From  *[3]int `json:"from,omitempty" jsonschema:"critique only a box, such as one building in a larger structure: first corner [x, y, z]"`
 	To    *[3]int `json:"to,omitempty" jsonschema:"opposite corner [x, y, z], inclusive"`
 	Limit int     `json:"limit,omitempty" jsonschema:"most findings to list per category (default 3)"`

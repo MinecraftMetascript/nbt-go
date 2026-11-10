@@ -118,7 +118,9 @@ func TestPaletteKeysFollowDataVersion(t *testing.T) {
 		{BlockStateIDVersion, "id", "properties"},
 	} {
 		s := New(tt.version)
-		s.SetBlock(0, 0, 0, MustParseBlockState("oak_log[axis=y]"), nil)
+		if err := s.SetBlock(0, 0, 0, MustParseBlockState("oak_log[axis=y]"), nil); err != nil {
+			t.Fatal(err)
+		}
 		var buf bytes.Buffer
 		if err := s.Write(&buf); err != nil {
 			t.Fatal(err)
@@ -145,7 +147,9 @@ func TestPaletteKeysFollowDataVersion(t *testing.T) {
 func TestRemoveBlock(t *testing.T) {
 	s := New(1)
 	stone := MustParseBlockState("stone")
-	s.Fill(0, 0, 0, 1, 1, 1, stone)
+	if err := s.Fill(0, 0, 0, 1, 1, 1, stone); err != nil {
+		t.Fatal(err)
+	}
 	if !s.RemoveBlock(0, 0, 0) {
 		t.Fatal("RemoveBlock returned false")
 	}
@@ -164,14 +168,19 @@ func TestRemoveBlock(t *testing.T) {
 
 func TestIndexSurvivesDirectEdits(t *testing.T) {
 	s := New(1)
-	s.SetBlock(0, 0, 0, MustParseBlockState("stone"), nil)
-	s.SetBlock(1, 0, 0, MustParseBlockState("dirt"), nil)
+	for x, b := range []string{"stone", "dirt"} {
+		if err := s.SetBlock(x, 0, 0, MustParseBlockState(b), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// Reorder the slice behind the helpers' back.
 	s.Blocks[0], s.Blocks[1] = s.Blocks[1], s.Blocks[0]
 	if st, _, _ := s.Block(0, 0, 0); st.Name != "minecraft:stone" {
 		t.Errorf("got %v", st)
 	}
-	s.SetBlock(0, 0, 0, MustParseBlockState("glass"), nil)
+	if err := s.SetBlock(0, 0, 0, MustParseBlockState("glass"), nil); err != nil {
+		t.Fatal(err)
+	}
 	if len(s.Blocks) != 2 {
 		t.Errorf("blocks = %d", len(s.Blocks))
 	}
@@ -179,7 +188,9 @@ func TestIndexSurvivesDirectEdits(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	s := New(1)
-	s.SetBlock(0, 0, 0, MustParseBlockState("stone"), nil)
+	if err := s.SetBlock(0, 0, 0, MustParseBlockState("stone"), nil); err != nil {
+		t.Fatal(err)
+	}
 	s.Blocks[0].State = 5
 	if err := s.Write(new(bytes.Buffer)); err == nil {
 		t.Error("expected error for bad palette index")

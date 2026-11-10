@@ -4,21 +4,27 @@ An MCP server that lets a model build Minecraft Java Edition structure files (`.
 
 ## Install
 
+With Go 1.25 or newer:
+
 ```sh
 go install github.com/MinecraftMetascript/nbt-go/cmd/nbt-mcp@latest
 ```
 
-This puts `nbt-mcp` in `$(go env GOPATH)/bin`, which should be on your `PATH`. It needs Go 1.25 or newer; older Go toolchains download the right version automatically.
+This puts `nbt-mcp` in `$(go env GOPATH)/bin`, which should be on your `PATH`. Older Go toolchains download the right version automatically.
+
+Without Go, download the archive for your system from the [releases page](https://github.com/MinecraftMetascript/nbt-go/releases), unpack it, and put `nbt-mcp` somewhere on your `PATH`.
 
 ## Add it to a client
 
-Claude Code:
+The server speaks MCP over stdin/stdout by default, which every client that starts local servers supports. If the client can't find the command, use the full path from `which nbt-mcp`.
+
+**Claude Code**
 
 ```sh
 claude mcp add minecraft -- nbt-mcp -dir ~/minecraft/structures
 ```
 
-Claude Desktop, or any client that uses an `mcpServers` config:
+**Claude Desktop, Cursor, Gemini CLI and other clients with an `mcpServers` config** (`claude_desktop_config.json`, `~/.cursor/mcp.json` or `.cursor/mcp.json`, `~/.gemini/settings.json`):
 
 ```json
 {
@@ -31,15 +37,62 @@ Claude Desktop, or any client that uses an `mcpServers` config:
 }
 ```
 
-If the client can't find the command, use the full path from `which nbt-mcp`.
+**VS Code** (`.vscode/mcp.json`):
+
+```json
+{
+  "servers": {
+    "minecraft": {
+      "type": "stdio",
+      "command": "nbt-mcp",
+      "args": ["-dir", "/path/to/structures"]
+    }
+  }
+}
+```
+
+**Codex CLI** (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.minecraft]
+command = "nbt-mcp"
+args = ["-dir", "/path/to/structures"]
+```
+
+### Over HTTP
+
+For clients that connect to a URL instead of starting a program, run the server yourself:
+
+```sh
+nbt-mcp -http localhost:8765 -dir ~/minecraft/structures
+```
+
+and point the client at `http://localhost:8765/mcp` (Streamable HTTP). In Claude Code that is `claude mcp add --transport http minecraft http://localhost:8765/mcp`.
+
+In this mode:
+
+- The server only reads and writes files inside `-dir`. Paths that leave it, directly or through a symlink, are refused.
+- All connected clients share the same open structures, so two clients can work on one build.
+- Requests from web pages on other sites are refused.
+- There is no login. Keep it on `localhost`, or set the `NBT_MCP_TOKEN` environment variable so clients must send that value as a bearer token (`Authorization: Bearer ...`). Put it behind a TLS proxy if it is reachable from other machines.
+
+## Compatibility
+
+Tool input schemas stick to the plain subset of JSON Schema that MCP clients and model APIs share: one type per property, enums for options, no `anyOf`, `oneOf` or `$ref`. Every tool has a title and annotations, so clients can tell the read-only tools (rendering, describing, linting) from the ones that edit a structure in memory and from `save_structure`, which writes a file.
+
+Calls are forgiving. `null` for an optional field counts as leaving it out, and mistakes come back as tool errors that say what is allowed.
+
+The server is built on the official Go SDK and negotiates whichever protocol version the client asks for, up to 2026-07-28.
 
 ## Flags
 
-| Flag            | Default | Meaning                                                                                                      |
-| --------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
-| `-dir`          | `.`     | Directory that relative paths in `save_structure` and `load_structure` resolve against.                      |
-| `-data-version` | `5023`  | DataVersion for new structures (`5023` is 26.3, `4189` is 1.21.4). Newer game versions upgrade older data but older ones can't read newer data, so lower it to target an older game. |
-| `-version`      |         | Print the version and exit.                                                                                  |
+| Flag              | Default | Meaning                                                                                                      |
+| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| `-dir`            | `.`     | Directory that relative paths in `save_structure` and `load_structure` resolve against.                      |
+| `-data-version`   | `5023`  | DataVersion for new structures (`5023` is 26.3, `4189` is 1.21.4). Newer game versions upgrade older data but older ones can't read newer data, so lower it to target an older game. |
+| `-http`           |         | Serve MCP over HTTP on this address, such as `localhost:8765`, instead of stdin/stdout. The endpoint is `/mcp`. |
+| `-restrict-paths` | off     | Only read and write files inside `-dir`. Always on with `-http`.                                              |
+| `-version`        |         | Print the version and exit.                                                                                  |
 
 ## Tools
 
@@ -116,3 +169,7 @@ The jigsaw tools follow the game's placement code (`JigsawPlacement`) for rigid 
 ## Using the files in a world
 
 Save to `<world>/generated/<namespace>/structure/<name>.nbt` (the folder is `structures` before 1.21). Then load it with a structure block in Load mode, or run `/place template <namespace>:<name>`. Structure blocks can only load up to 48 blocks on each axis, but `/place template` has no such limit.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
