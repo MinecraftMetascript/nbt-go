@@ -293,11 +293,11 @@ func newServer(s *state) *mcp.Server {
 		handlerOut(s.critique))
 
 	addTool(srv, s, kindHistory, "undo", "Undo edits",
-		"Undo the most recent edits, one tool call per step: a fill, a paste, a crop, creating or loading a structure, and so on. Files already saved are not changed. Use it to back out of a change that made the build worse instead of repairing it by hand.",
+		"Undo the most recent edits, one tool call per step: a fill, a paste, a crop, creating or loading a structure, and so on. Files already saved are not changed. Use it to back out of a change that made the build worse instead of repairing it by hand. With name, it undoes only edits to that structure; pass it whenever several agents share the server, so one agent's undo never reverts another's edit.",
 		handlerOut(s.undoEdits))
 
 	addTool(srv, s, kindHistory, "redo", "Redo edits",
-		"Redo edits that undo took back. A new edit after an undo clears what could be redone.",
+		"Redo edits that undo took back; name limits it to one structure. A new edit to a structure clears what could be redone on it.",
 		handlerOut(s.redoEdits))
 
 	addGuide(srv, s)

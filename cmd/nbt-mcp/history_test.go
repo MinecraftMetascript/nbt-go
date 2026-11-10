@@ -232,3 +232,30 @@ func TestStructuredOutput(t *testing.T) {
 		t.Errorf("undo: %v", u)
 	}
 }
+
+// TestUndoByName is two agents sharing a server: each undoes only its own
+// structure's edits.
+func TestUndoByName(t *testing.T) {
+	cs := connect(t, t.TempDir())
+	blocks := func() string { return call(t, cs, "list_structures", nil, false) }
+	call(t, cs, "create_structure", map[string]any{"name": "a"}, false)
+	call(t, cs, "create_structure", map[string]any{"name": "b"}, false)
+	call(t, cs, "fill", map[string]any{"name": "a", "from": []int{0, 0, 0}, "to": []int{1, 0, 0}, "block": "stone"}, false)
+	call(t, cs, "fill", map[string]any{"name": "b", "from": []int{0, 0, 0}, "to": []int{2, 0, 0}, "block": "dirt"}, false)
+
+	out := call(t, cs, "undo", map[string]any{"name": "a"}, false)
+	wantContains(t, "undo", out, "Undid fill on a.", "1 more edits to \"a\" can be undone, 1 redone")
+	wantContains(t, "list_structures", blocks(), "a: size 0x0x0, 0 blocks", "b: size 3x1x1, 3 blocks")
+
+	// b's agent keeps editing; a's undone fill can still be redone.
+	call(t, cs, "fill", map[string]any{"name": "b", "from": []int{0, 1, 0}, "to": []int{2, 1, 0}, "block": "dirt"}, false)
+	call(t, cs, "redo", map[string]any{"name": "a"}, false)
+	wantContains(t, "list_structures", blocks(), "a: size 2x1x1, 2 blocks", "b: size 3x2x1, 6 blocks")
+
+	// Steps stop at the structure's own history.
+	out = call(t, cs, "undo", map[string]any{"name": "b", "steps": 5}, false)
+	wantContains(t, "undo", out, `"b" is no longer open`)
+	wantContains(t, "list_structures", blocks(), "a: size 2x1x1, 2 blocks")
+	call(t, cs, "undo", map[string]any{"name": "b"}, true)
+	call(t, cs, "redo", map[string]any{"name": "nope"}, true)
+}

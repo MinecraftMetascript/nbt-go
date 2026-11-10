@@ -177,6 +177,8 @@ Hollow shapes are watertight: every inside position is cut off from the outside 
 
 Every tool call that changes a structure is one step of history: a fill, a paste, a crop, creating or loading a structure. `undo` takes back the latest step, or several with `steps`, and `redo` puts them back until the next new edit. Files already saved are not touched.
 
+The history is shared by everything connected to the server. When several agents build at once, pass `name` to `undo` and `redo`: they then step through only that structure's edits, and a new edit only clears the redo steps of the structures it changes.
+
 An edit that fails changes nothing, even if it had placed some blocks before running into the problem.
 
 The history keeps the last 100 steps, fewer when the structures are very large.

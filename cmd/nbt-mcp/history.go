@@ -76,10 +76,26 @@ func (s *state) restore(e edit) edit {
 	return replaced
 }
 
-// record adds a finished edit to the history, which ends any chance to redo.
+func (e edit) touches(name string) bool {
+	_, ok := e.before[name]
+	return ok
+}
+
+func (e edit) overlaps(o edit) bool {
+	for n := range e.before {
+		if o.touches(n) {
+			return true
+		}
+	}
+	return false
+}
+
+// record adds a finished edit to the history. It ends any chance to redo
+// edits to the same structures; undone edits to other structures can still
+// be redone, so agents working on separate structures don't interfere.
 func (s *state) record(e edit) {
 	s.undo = append(s.undo, e)
-	s.redo = nil
+	s.redo = slices.DeleteFunc(s.redo, e.overlaps)
 	total := 0
 	for i := len(s.undo) - 1; i >= 0; i-- {
 		total += s.undo[i].blocks()
@@ -140,7 +156,8 @@ func clonePalette(p []structure.BlockState) []structure.BlockState {
 }
 
 type historyIn struct {
-	Steps int `json:"steps,omitempty" jsonschema:"how many edits to step through (default 1)"`
+	Name  string `json:"name,omitempty" jsonschema:"only step through edits to this structure, leaving edits to other structures alone. Pass it whenever several agents share the server"`
+	Steps int    `json:"steps,omitempty" jsonschema:"how many edits to step through (default 1)"`
 }
 
 type historyOut struct {
@@ -169,15 +186,19 @@ func (s *state) step(in historyIn, from, to *[]edit, verb, done string) (string,
 	if n <= 0 {
 		n = 1
 	}
-	if len(*from) == 0 {
-		return "", historyOut{}, errors.New("there is nothing to " + verb)
-	}
 	out := historyOut{Steps: []historyStep{}}
 	touched := map[string]bool{}
 	var b strings.Builder
-	for ; n > 0 && len(*from) > 0; n-- {
-		e := (*from)[len(*from)-1]
-		*from = (*from)[:len(*from)-1]
+	for ; n > 0; n-- {
+		i, err := pick(*from, in.Name, verb)
+		if err != nil {
+			if len(out.Steps) == 0 {
+				return "", historyOut{}, err
+			}
+			break
+		}
+		e := (*from)[i]
+		*from = slices.Delete(*from, i, i+1)
 		*to = append(*to, s.restore(e))
 		names := e.names()
 		out.Steps = append(out.Steps, historyStep{Tool: e.tool, Structures: names})
@@ -198,8 +219,58 @@ func (s *state) step(in historyIn, from, to *[]edit, verb, done string) (string,
 			fmt.Fprintf(&b, "%q is no longer open.\n", name)
 		}
 	}
-	out.CanUndo, out.CanRedo, out.Structures = len(s.undo), len(s.redo), s.names()
-	fmt.Fprintf(&b, "%d more can be undone, %d redone.", out.CanUndo, out.CanRedo)
+	out.CanUndo, out.CanRedo, out.Structures = count(s.undo, in.Name), count(s.redo, in.Name), s.names()
+	if in.Name != "" {
+		fmt.Fprintf(&b, "%d more edits to %q can be undone, %d redone.", out.CanUndo, in.Name, out.CanRedo)
+	} else {
+		fmt.Fprintf(&b, "%d more can be undone, %d redone.", out.CanUndo, out.CanRedo)
+	}
 	s.notify(names)
 	return b.String(), out, nil
+}
+
+// pick finds the edit to step through next: the latest one, or with a name,
+// the latest one that touched that structure. An edit that also touched
+// other structures can only be stepped through if none of them has a later
+// edit, which restoring it would wipe out.
+func pick(stack []edit, name, verb string) (int, error) {
+	if len(stack) == 0 {
+		return 0, errors.New("there is nothing to " + verb)
+	}
+	if name == "" {
+		return len(stack) - 1, nil
+	}
+	for i := len(stack) - 1; i >= 0; i-- {
+		e := stack[i]
+		if !e.touches(name) {
+			continue
+		}
+		for _, later := range stack[i+1:] {
+			if later.overlaps(e) {
+				var shared []string
+				for _, n := range e.names() {
+					if later.touches(n) {
+						shared = append(shared, n)
+					}
+				}
+				return 0, fmt.Errorf("the last %s on %q (%s) also changed %s, which has a later edit (%s); %s that first", verb, name, e.tool, strings.Join(shared, ", "), later.tool, verb)
+			}
+		}
+		return i, nil
+	}
+	return 0, fmt.Errorf("there is nothing to %s on %q", verb, name)
+}
+
+// count is how many edits in stack touch name, or all of them.
+func count(stack []edit, name string) int {
+	if name == "" {
+		return len(stack)
+	}
+	n := 0
+	for _, e := range stack {
+		if e.touches(name) {
+			n++
+		}
+	}
+	return n
 }
