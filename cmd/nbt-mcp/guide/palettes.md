@@ -2,7 +2,7 @@
 
 Starting palettes by theme. Each lists blocks per role; weighted mixes can be pasted straight into fill and the shape tools. Survival palettes stick to common materials; creative palettes add variety and rarer blocks. Swap woods and stones to match the biome.
 
-Block ids are for 1.21.x. (In 1.21.9 and later, chain is iron_chain.)
+Block ids are for 1.21.x. (In 1.21.9 and later, chain is iron_chain.) The blocks under "Newer blocks" at the end need a newer game; only use them when the structure's DataVersion is at least that release, or lint's `newer` check will flag them.
 
 ## Medieval timber house (plains, forest)
 
@@ -99,3 +99,13 @@ Creative
 - Pillars: polished_basalt, basalt; bands of red_nether_bricks
 - Roof: crimson_stairs or nether_brick_stairs
 - Detail: chains, soul_lantern, shroomlight hidden behind crimson_trapdoor, magma_block accents, crying_obsidian very sparingly
+
+## Newer blocks (26.1 to 26.3)
+
+Only for structures with a DataVersion of at least the release named (26.1 is 4786, 26.2 is 4903, 26.3 is 5023).
+
+- 26.3, poplar wood: poplar_planks, poplar_log, stripped_poplar_log, poplar_stairs, poplar_slab, poplar_fence, poplar_door, poplar_trapdoor, poplar_shelf. A pale grey-brown wood that suits Nordic and coastal builds; autumn trees with yellow_poplar_leaves, orange_poplar_leaves and red_poplar_leaves.
+- 26.3, wool and concrete slabs and stairs in all 16 colours (white_wool_stairs, red_concrete_slab and so on): soft, colourful roofs and awnings, and clean modern trim.
+- 26.3, decoration: straw_bed for rustic or farm interiors, red_shrub and shelf_mushroom (on the side of logs) for overgrown and autumn scenes.
+- 26.2, sulfur and cinnabar stone families (blocks, polished, bricks, chiseled, with slabs, stairs and walls): a yellow and a rust-red stone. Good for volcanic, desert and Nether-adjacent builds; sulfur_spike works like pointed_dripstone.
+- 26.1: golden_dandelion, a flower accent for gardens.
